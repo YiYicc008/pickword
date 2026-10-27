@@ -253,42 +253,185 @@ const NL = String.fromCharCode(10);
 let refetchState = { running: false, cancel: false, done: 0, total: 0, bookId: null };
 let syncRefetchButton = () => {};
 
+/** 勾选「要覆盖哪些手工编辑过的单词」，返回选中的 id 集合；取消返回 null */
+function pickManualWords(words, headline) {
+  return new Promise((resolve) => {
+    const picked = new Set(words.map((w) => w.id));
+    const list = el('div', { class: 'ov-list' });
+    const countEl = el('span', { class: 'ov-count' });
+    const allBtn = el('button', { class: 'btn btn-quiet btn-sm', text: '全选' });
+
+    const paint = () => {
+      countEl.textContent = `已选 ${picked.size} / ${words.length}`;
+      for (const row of list.querySelectorAll('.ov-row')) {
+        row.classList.toggle('on', picked.has(row.dataset.id));
+        const box = row.querySelector('.ov-box');
+        if (box) box.checked = picked.has(row.dataset.id);
+      }
+      allBtn.textContent = picked.size === words.length ? '清空' : '全选';
+    };
+
+    for (const w of words) {
+      const box = el('input', { class: 'ov-box', type: 'checkbox' });
+      box.checked = true;
+      const row = el('label', { class: 'ov-row on', 'data-id': w.id }, [
+        box,
+        el('span', { class: 'ov-term', text: w.term }),
+        el('span', {
+          class: 'ov-zh',
+          text: String(w.meaningZh || '').split('；').filter(Boolean).slice(0, 2).join('；') || '（没填中文）',
+        }),
+      ]);
+      box.addEventListener('change', () => {
+        if (box.checked) picked.add(w.id);
+        else picked.delete(w.id);
+        paint();
+      });
+      list.appendChild(row);
+    }
+
+    allBtn.addEventListener('click', () => {
+      const all = picked.size === words.length;
+      picked.clear();
+      if (!all) for (const w of words) picked.add(w.id);
+      paint();
+    });
+
+    const body = el('div', {}, [
+      el('p', { class: 'ov-tip', text: headline }),
+      el('div', { class: 'ov-head' }, [allBtn, countEl]),
+      list,
+      el('p', { class: 'ov-note', text: '没勾选的单词会保留你手工编辑的释义，只更新音标和发音。' }),
+    ]);
+
+    const cancel = el('button', { class: 'btn btn-quiet', text: '返回' });
+    const ok = el('button', { class: 'btn btn-primary', text: '确定' });
+    let settled = false;
+    const done = (val) => {
+      if (settled) return;
+      settled = true;
+      ref.close();
+      resolve(val);
+    };
+    cancel.addEventListener('click', () => done(null));
+    ok.addEventListener('click', () => {
+      if (!picked.size) { toast('至少选一个单词', 'default'); return; }
+      ok.textContent = '确定';
+      done(new Set(picked));
+    });
+
+    const ref = openModal({
+      title: '选择要覆盖的单词',
+      subtitle: '这些单词的释义被你手工改过，重新获取会覆盖它们',
+      body,
+      footer: el('div', { style: 'display:flex;gap:8px;margin-left:auto' }, [cancel, ok]),
+      onClose: () => done(null),
+    });
+    paint();
+  });
+}
+
+/** 重新获取前先问：要不要覆盖手工编辑，选「覆盖」再勾选具体单词 */
+async function askRefetch(scope, bookId, words) {
+  const book = getBook(bookId);
+  const manual = words.filter((w) => w.sensesManual);
+  const lines = [
+    scope === 'book'
+      ? `将重新查询「${book ? book.name : '当前单词本'}」里全部 ${words.length} 个单词的音标、发音、词性和中文释义。`
+      : `将重新查询「${words[0] ? words[0].term : ''}」的音标、发音、词性和中文释义。`,
+    '',
+    '· 词典接口有限速，会逐个查询，大约几十秒到几分钟；',
+  ];
+  if (scope === 'book') lines.push('· 查询过程中单词会一个个更新，可以随时点「取消」停下；');
+  lines.push('· 查不到的词保留原来的内容，不会变空；');
+  lines.push(
+    manual.length
+      ? `· 其中 ${manual.length} 个单词你手工编辑过释义，默认保留；`
+      : '· 手动改过的中文释义会被新查到的结果覆盖。',
+  );
+
+  return new Promise((resolve) => {
+    const cover = el('input', { class: 'ov-box', type: 'checkbox' });
+    const coverRow = el('label', { class: 'ov-cover' }, [
+      cover,
+      el('span', {
+        text: manual.length
+          ? `覆盖手工编辑过的 ${manual.length} 个单词（勾选后可挑选具体是哪几个）`
+          : '覆盖手工编辑过的单词（当前没有）',
+      }),
+    ]);
+    if (!manual.length) { cover.disabled = true; coverRow.style.opacity = '.5'; }
+
+    const body = el('div', {}, [
+      el('p', { style: 'white-space:pre-line;line-height:1.9', text: lines.join(NL) }),
+      manual.length ? coverRow : null,
+    ]);
+
+    const cancel = el('button', { class: 'btn btn-quiet', text: '取消' });
+    const start = el('button', { class: 'btn btn-primary', text: '开始重新获取' });
+    let settled = false;
+    const finish = (val) => {
+      if (settled) return;
+      settled = true;
+      ref.close();
+      resolve(val);
+    };
+    cancel.addEventListener('click', () => finish({ started: false, overwrite: new Set() }));
+    start.addEventListener('click', async () => {
+      if (!cover.checked || !manual.length) { finish({ started: true, overwrite: new Set() }); return; }
+      if (settled) return;
+      settled = true;
+      ref.close(); // 先收起提示框，避免两层遮罩叠在一起
+      const picked = await pickManualWords(
+        manual,
+        `本单词本有 ${manual.length} 个单词被手工编辑过，勾选要重新抓取并覆盖的：`,
+      );
+      resolve(picked ? { started: true, overwrite: picked } : { started: false, overwrite: new Set() });
+    });
+
+    const ref = openModal({
+      title: scope === 'book' ? '全部重新获取' : '重新获取',
+      body,
+      footer: el('div', { style: 'display:flex;gap:8px;margin-left:auto' }, [cancel, start]),
+      onClose: () => finish({ started: false, overwrite: new Set() }),
+    });
+  });
+}
+
 async function refetchAll(bookId) {
   if (refetchState.running) { refetchState.cancel = true; return; }
   const words = getEntriesOfBook(bookId).map((x) => x.word).filter(Boolean);
   if (!words.length) { toast('这个单词本还没有单词', 'default'); return; }
-  const book = getBook(bookId);
-  const ok = await confirmDialog({
-    title: '全部重新获取',
-    message: [
-      `将重新查询「${book ? book.name : '当前单词本'}」里全部 ${words.length} 个单词的音标、发音、词性和中文释义。`,
-      '',
-      '· 词典接口有限速，会逐个查询，大约几十秒到几分钟；',
-      '· 查询过程中单词会一个个更新，可以随时点「取消」停下；',
-      '· 查不到的词保留原来的内容，不会变空；',
-      '· 手动改过的中文释义会被新查到的结果覆盖。',
-    ].join(NL),
-    confirmText: '开始重新获取',
-  });
-  if (!ok) return;
+  const asked = await askRefetch('book', bookId, words);
+  if (!asked.started) return;
+  const overwrite = asked.overwrite;
 
   refetchState = { running: true, cancel: false, done: 0, total: words.length, bookId };
   syncRefetchButton();
   let updated = 0;
   let failed = 0;
+  let kept = 0;
   let rateStop = false;
 
   for (const w of words) {
     if (refetchState.cancel) break;
     try {
       const data = await enrichTerm(w.term, { aiClient: aiClientFor(), useDictApi: true, force: true });
+      // 手工编辑过、又没被勾选覆盖的词：只更新音标和发音
+      const protect = w.sensesManual && !overwrite.has(w.id);
       const patch = {};
       if (data.phonetic) patch.phonetic = data.phonetic;
       if (data.audio) patch.audio = data.audio;
-      if (data.pos?.length) patch.pos = data.pos;
-      if (data.senses?.length) patch.senses = data.senses;
-      if (data.meaningZh) patch.meaningZh = data.meaningZh;
-      patch.enrichState = data.enrichState || 'done';
+      if (protect) {
+        kept++;
+        patch.enrichState = w.enrichState || 'done';
+      } else {
+        if (data.pos?.length) patch.pos = data.pos;
+        if (data.senses?.length) patch.senses = data.senses;
+        if (data.meaningZh) patch.meaningZh = data.meaningZh;
+        if (w.sensesManual) patch.sensesManual = false;
+        patch.enrichState = data.enrichState || 'done';
+      }
       if (Object.keys(patch).length > 1) { updateWord(w.id, patch); updated++; }
       else failed++;
       // 翻译接口限流时别硬撑：剩下的改天再来，否则会把一批词的中文洗成空的
@@ -308,10 +451,11 @@ async function refetchAll(bookId) {
   refetchState.running = false;
   renderAfterDataChange();
   let msg;
-  if (rateStop) msg = `翻译接口限流，先更新了 ${updated} 个单词，剩下的稍后再试`;
-  else if (cancelled) msg = `已停止，更新了 ${updated} 个单词`;
-  else if (failed) msg = `已更新 ${updated} 个单词，${failed} 个没查到（保留原内容）`;
-  else msg = `已更新 ${updated} 个单词`;
+  const keptNote = kept ? `，${kept} 个保留了你手工编辑的释义` : '';
+  if (rateStop) msg = `翻译接口限流，先更新了 ${updated} 个单词${keptNote}，剩下的稍后再试`;
+  else if (cancelled) msg = `已停止，更新了 ${updated} 个单词${keptNote}`;
+  else if (failed) msg = `已更新 ${updated} 个单词${keptNote}，${failed} 个没查到（保留原内容）`;
+  else msg = `已更新 ${updated} 个单词${keptNote}`;
   toast(msg, updated ? 'success' : 'default', 3600);
 }
 
@@ -827,6 +971,9 @@ export function openWordDetail(wordId, bookId) {
   refreshBtn.innerHTML = icon('refresh', 15) + '<span>重新获取</span>';
   refreshBtn.title = '重新查一次词典，补齐音标、词性与多个义项';
   refreshBtn.addEventListener('click', async () => {
+    const asked = await askRefetch('word', bookId, [word]);
+    if (!asked.started) return;
+    const protect = !!word.sensesManual && !asked.overwrite.has(word.id);
     refreshBtn.disabled = true;
     refreshBtn.innerHTML = icon('refresh', 15) + '<span>获取中…</span>';
     try {
@@ -834,15 +981,24 @@ export function openWordDetail(wordId, bookId) {
       const patch = {
         phonetic: data.phonetic || word.phonetic,
         audio: data.audio || word.audio,
-        pos: data.pos?.length ? data.pos : word.pos,
-        senses: data.senses?.length ? data.senses : word.senses,
-        meaningZh: data.meaningZh || word.meaningZh,
-        enrichState: data.enrichState,
+        enrichState: data.enrichState || word.enrichState,
       };
+      if (protect) {
+        patch.pos = word.pos;
+        patch.senses = word.senses;
+        patch.meaningZh = word.meaningZh;
+        patch.sensesManual = true;
+      } else {
+        patch.pos = data.pos?.length ? data.pos : word.pos;
+        patch.senses = data.senses?.length ? data.senses : word.senses;
+        patch.meaningZh = data.meaningZh || word.meaningZh;
+        patch.sensesManual = false;
+      }
       updateWord(wordId, patch);
       ref.close();
       render();
-      if (patch.senses?.length) toast(`已补全 ${patch.senses.length} 个义项`, 'success');
+      if (protect) toast('已更新音标与发音，保留了你手工编辑的释义', 'success', 3000);
+      else if (patch.senses?.length) toast(`已补全 ${patch.senses.length} 个义项`, 'success');
       else toast('词典没有查到，稍后再试或手动填写释义', 'default', 3000);
       openWordDetail(wordId, bookId);
     } catch (e) {
