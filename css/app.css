@@ -541,12 +541,16 @@ a { color: var(--accent); }
   background: var(--surface);
   transition: box-shadow .16s var(--ease), border-color .16s var(--ease), opacity .16s;
 }
+.se-card { cursor: grab; }
+.se-card input { cursor: text; }
 .se-card.dragging {
   position: relative;
   z-index: 2;
   border-color: var(--accent);
   background: #fff;
   box-shadow: var(--sh-2);
+  cursor: grabbing;
+  user-select: none;
 }
 .se-handle {
   flex: none;

@@ -253,13 +253,14 @@ const NL = String.fromCharCode(10);
 let refetchState = { running: false, cancel: false, done: 0, total: 0, bookId: null };
 let syncRefetchButton = () => {};
 
-/** 勾选「要覆盖哪些手工编辑过的单词」，返回选中的 id 集合；取消返回 null */
+/** 勾选「要覆盖哪些手动编辑过的单词」，返回选中的 id 集合；取消返回 null */
 function pickManualWords(words, headline) {
   return new Promise((resolve) => {
     const picked = new Set(words.map((w) => w.id));
     const list = el('div', { class: 'ov-list' });
     const countEl = el('span', { class: 'ov-count' });
     const allBtn = el('button', { class: 'btn btn-quiet btn-sm', text: '全选' });
+    const noneBtn = el('button', { class: 'btn btn-quiet btn-sm', text: '清空' });
 
     const paint = () => {
       countEl.textContent = `已选 ${picked.size} / ${words.length}`;
@@ -268,7 +269,8 @@ function pickManualWords(words, headline) {
         const box = row.querySelector('.ov-box');
         if (box) box.checked = picked.has(row.dataset.id);
       }
-      allBtn.textContent = picked.size === words.length ? '清空' : '全选';
+      allBtn.disabled = picked.size === words.length;
+      noneBtn.disabled = picked.size === 0;
     };
 
     for (const w of words) {
@@ -291,17 +293,19 @@ function pickManualWords(words, headline) {
     }
 
     allBtn.addEventListener('click', () => {
-      const all = picked.size === words.length;
+      for (const w of words) picked.add(w.id);
+      paint();
+    });
+    noneBtn.addEventListener('click', () => {
       picked.clear();
-      if (!all) for (const w of words) picked.add(w.id);
       paint();
     });
 
     const body = el('div', {}, [
       el('p', { class: 'ov-tip', text: headline }),
-      el('div', { class: 'ov-head' }, [allBtn, countEl]),
+      el('div', { class: 'ov-head' }, [allBtn, noneBtn, countEl]),
       list,
-      el('p', { class: 'ov-note', text: '没勾选的单词会保留你手工编辑的释义，只更新音标和发音。' }),
+      el('p', { class: 'ov-note', text: '没勾选的单词会保留你手动编辑的释义，只更新音标和发音。' }),
     ]);
 
     const cancel = el('button', { class: 'btn btn-quiet', text: '返回' });
@@ -322,7 +326,7 @@ function pickManualWords(words, headline) {
 
     const ref = openModal({
       title: '选择要覆盖的单词',
-      subtitle: '这些单词的释义被你手工改过，重新获取会覆盖它们',
+      subtitle: '这些单词的释义被你手动改过，重新获取会覆盖它们',
       body,
       footer: el('div', { style: 'display:flex;gap:8px;margin-left:auto' }, [cancel, ok]),
       onClose: () => done(null),
@@ -331,7 +335,7 @@ function pickManualWords(words, headline) {
   });
 }
 
-/** 重新获取前先问：要不要覆盖手工编辑，选「覆盖」再勾选具体单词 */
+/** 重新获取前先问：要不要覆盖手动编辑，选「覆盖」再勾选具体单词 */
 async function askRefetch(scope, bookId, words) {
   const book = getBook(bookId);
   const manual = words.filter((w) => w.sensesManual);
@@ -346,7 +350,7 @@ async function askRefetch(scope, bookId, words) {
   lines.push('· 查不到的词保留原来的内容，不会变空；');
   lines.push(
     manual.length
-      ? `· 其中 ${manual.length} 个单词你手工编辑过释义，默认保留；`
+      ? `· 其中 ${manual.length} 个单词你手动编辑过释义，默认保留；`
       : '· 手动改过的中文释义会被新查到的结果覆盖。',
   );
 
@@ -356,8 +360,8 @@ async function askRefetch(scope, bookId, words) {
       cover,
       el('span', {
         text: manual.length
-          ? `覆盖手工编辑过的 ${manual.length} 个单词（勾选后可挑选具体是哪几个）`
-          : '覆盖手工编辑过的单词（当前没有）',
+          ? `覆盖手动编辑过的 ${manual.length} 个单词（勾选后可挑选具体是哪几个）`
+          : '覆盖手动编辑过的单词（当前没有）',
       }),
     ]);
     if (!manual.length) { cover.disabled = true; coverRow.style.opacity = '.5'; }
@@ -384,7 +388,7 @@ async function askRefetch(scope, bookId, words) {
       ref.close(); // 先收起提示框，避免两层遮罩叠在一起
       const picked = await pickManualWords(
         manual,
-        `本单词本有 ${manual.length} 个单词被手工编辑过，勾选要重新抓取并覆盖的：`,
+        `本单词本有 ${manual.length} 个单词被手动编辑过，勾选要重新抓取并覆盖的：`,
       );
       resolve(picked ? { started: true, overwrite: picked } : { started: false, overwrite: new Set() });
     });
@@ -417,7 +421,7 @@ async function refetchAll(bookId) {
     if (refetchState.cancel) break;
     try {
       const data = await enrichTerm(w.term, { aiClient: aiClientFor(), useDictApi: true, force: true });
-      // 手工编辑过、又没被勾选覆盖的词：只更新音标和发音
+      // 手动编辑过、又没被勾选覆盖的词：只更新音标和发音
       const protect = w.sensesManual && !overwrite.has(w.id);
       const patch = {};
       if (data.phonetic) patch.phonetic = data.phonetic;
@@ -451,7 +455,7 @@ async function refetchAll(bookId) {
   refetchState.running = false;
   renderAfterDataChange();
   let msg;
-  const keptNote = kept ? `，${kept} 个保留了你手工编辑的释义` : '';
+  const keptNote = kept ? `，${kept} 个保留了你手动编辑的释义` : '';
   if (rateStop) msg = `翻译接口限流，先更新了 ${updated} 个单词${keptNote}，剩下的稍后再试`;
   else if (cancelled) msg = `已停止，更新了 ${updated} 个单词${keptNote}`;
   else if (failed) msg = `已更新 ${updated} 个单词${keptNote}，${failed} 个没查到（保留原内容）`;
@@ -788,38 +792,51 @@ export function openWordDetail(wordId, bookId) {
   if (!seed.length && word.meaningZh) {
     seed.push({ pos: word.pos?.[0]?.tag || '', zh: word.meaningZh, def: '' });
   }
+  // 打开时的释义快照：保存时用它判断「到底有没有改动」，没改动就不算手动编辑
+  const sig = (arr) => JSON.stringify(arr.map((x) => ({
+    pos: String(x.pos || '').toLowerCase(),
+    zh: String(x.zh || '').trim(),
+    def: String(x.def || '').trim(),
+    example: String(x.example || '').trim(),
+  })));
+  const seedSig = sig(seed);
 
-  function attachDrag(handle, card) {
-    handle.addEventListener('pointerdown', (e) => {
+  // 整张卡片都能拖（输入框、按钮除外）；监听挂在 window 上，鼠标移出卡片也跟得住
+  function attachDrag(card) {
+    card.addEventListener('pointerdown', (e) => {
       if (e.button && e.button !== 0) return;
+      if (e.target.closest('input, button, select, textarea')) return;
       e.preventDefault();
-      try { handle.setPointerCapture(e.pointerId); } catch (err) { /* 合成事件没有真实指针 */ }
+      const startY = e.clientY;
+      let moving = false;
       card.classList.add('dragging');
       const addBtn = senseList.querySelector('.se-add');
       const onMove = (ev) => {
-        const others = Array.from(senseList.querySelectorAll('.se-card')).filter((c) => c !== card);
+        if (!moving && Math.abs(ev.clientY - startY) < 3) return;
+        moving = true;
+        const others = Array.from(senseList.querySelectorAll('.se-card:not(.se-add)')).filter((c) => c !== card);
         let placed = false;
         for (const c of others) {
           const r = c.getBoundingClientRect();
           if (ev.clientY < r.top + r.height / 2) {
-            senseList.insertBefore(card, c);
+            if (card.nextElementSibling !== c) senseList.insertBefore(card, c);
             placed = true;
             break;
           }
         }
-        if (!placed && addBtn) senseList.insertBefore(card, addBtn);
+        if (!placed && addBtn && card.nextElementSibling !== addBtn) senseList.insertBefore(card, addBtn);
         paintTags();
       };
       const onUp = () => {
         card.classList.remove('dragging');
-        handle.removeEventListener('pointermove', onMove);
-        handle.removeEventListener('pointerup', onUp);
-        handle.removeEventListener('pointercancel', onUp);
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+        window.removeEventListener('pointercancel', onUp);
         paintTags();
       };
-      handle.addEventListener('pointermove', onMove);
-      handle.addEventListener('pointerup', onUp);
-      handle.addEventListener('pointercancel', onUp);
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+      window.addEventListener('pointercancel', onUp);
     });
   }
 
@@ -860,7 +877,7 @@ export function openWordDetail(wordId, bookId) {
     if (src.example) main.appendChild(el('div', { class: 'se-eg', text: `e.g. ${src.example}` }));
     card.append(handle, main);
     delBtn.addEventListener('click', () => { card.remove(); paintTags(); });
-    attachDrag(handle, card);
+    attachDrag(card);
     return card;
   }
 
@@ -878,7 +895,7 @@ export function openWordDetail(wordId, bookId) {
   senseList.appendChild(
     el('p', {
       class: 'se-hint',
-      text: '拖动左侧手柄可调整顺序；列表里只显示前两条。',
+      text: '按住卡片上下拖可以调整顺序（输入框除外）；列表里只显示前两条。',
     }),
   );
   senseList.addEventListener('input', () => paintTags());
@@ -997,7 +1014,7 @@ export function openWordDetail(wordId, bookId) {
       updateWord(wordId, patch);
       ref.close();
       render();
-      if (protect) toast('已更新音标与发音，保留了你手工编辑的释义', 'success', 3000);
+      if (protect) toast('已更新音标与发音，保留了你手动编辑的释义', 'success', 3000);
       else if (patch.senses?.length) toast(`已补全 ${patch.senses.length} 个义项`, 'success');
       else toast('词典没有查到，稍后再试或手动填写释义', 'default', 3000);
       openWordDetail(wordId, bookId);
@@ -1021,11 +1038,13 @@ export function openWordDetail(wordId, bookId) {
       .filter((s) => s.zh || s.pos);
     const meaningZh = out.map((s) => s.zh).filter(Boolean).slice(0, 4).join('；');
     const tags = Array.from(new Set(out.map((s) => s.pos).filter(Boolean)));
+    // 加了又删、改了又改回去 → 内容与打开时一致，就不打「手动编辑」标记
+    const changed = sig(out) !== seedSig;
     updateWord(wordId, {
       senses: out,
       meaningZh,
       pos: tags.length ? tags.map((t) => ({ tag: t })) : word.pos,
-      sensesManual: true,
+      sensesManual: changed ? true : !!word.sensesManual,
       enrichState: out.length ? 'done' : word.enrichState,
     });
     toast('已保存', 'success');
