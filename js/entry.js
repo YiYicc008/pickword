@@ -6,7 +6,7 @@ import { el, debounce, looksEnglish } from './util.js';
 import { enrichTerm, speak } from './dict.js';
 import { hasAI, classifyWord, translateWord, translateSenses, describeWord } from './ai.js';
 import { vs } from './viewstate.js';
-import { posAbbr } from './format.js';
+import { posAbbr, sensesSig } from './format.js';
 
 const aiClient = () =>
   hasAI()
@@ -286,6 +286,8 @@ export function openAddWordDialog({ preselectBookId = null, initialTerm = '' } =
           senses: data.senses?.length ? data.senses : res.word.senses,
           meaningZh: data.meaningZh || res.word.meaningZh,
           enrichState: data.enrichState || 'done',
+          // 记下「词典/AI 给的原始顺序」，用户把卡片改回这个顺序就算没改过
+          autoSig: sensesSig(data.senses || []),
         });
       };
       if (cached?.data) apply(cached.data);

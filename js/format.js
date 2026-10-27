@@ -41,3 +41,14 @@ export function weightClass(w) {
   if (w >= 1) return `w-${w}`;
   return 'w-1';
 }
+
+/** 释义数组的归一化签名：用来判断「用户到底改没改」。
+ *  只比较词性、中文、英文释义、例句，忽略 id/时间等无关字段。 */
+export function sensesSig(list) {
+  return JSON.stringify((Array.isArray(list) ? list : []).map((x) => ({
+    pos: String((x && x.pos) || '').toLowerCase().trim(),
+    zh: String((x && x.zh) || '').trim(),
+    def: String((x && x.def) || '').trim(),
+    example: String((x && x.example) || '').trim(),
+  })));
+}

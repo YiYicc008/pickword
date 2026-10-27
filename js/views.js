@@ -18,7 +18,7 @@ import {
   authSummary, syncConfig, SYNC_SQL,
 } from './sync.js';
 
-import { posAbbr, posTag, posClass, weightClass } from './format.js';
+import { posAbbr, posTag, posClass, weightClass, sensesSig } from './format.js';
 
 export { posAbbr, weightClass };
 
@@ -230,6 +230,7 @@ async function fillMissing(bookId, btn) {
         pos: data.pos?.length ? data.pos : w.pos,
         senses: data.senses?.length ? data.senses : w.senses,
         meaningZh: data.meaningZh || w.meaningZh,
+        autoSig: data.senses?.length ? sensesSig(data.senses) : w.autoSig,
         enrichState: data.enrichState,
       };
       if (patch.senses?.length || patch.phonetic) { updateWord(w.id, patch); filled++; }
@@ -431,7 +432,7 @@ async function refetchAll(bookId) {
         patch.enrichState = w.enrichState || 'done';
       } else {
         if (data.pos?.length) patch.pos = data.pos;
-        if (data.senses?.length) patch.senses = data.senses;
+        if (data.senses?.length) { patch.senses = data.senses; patch.autoSig = sensesSig(data.senses); }
         if (data.meaningZh) patch.meaningZh = data.meaningZh;
         if (w.sensesManual) patch.sensesManual = false;
         patch.enrichState = data.enrichState || 'done';
@@ -792,14 +793,9 @@ export function openWordDetail(wordId, bookId) {
   if (!seed.length && word.meaningZh) {
     seed.push({ pos: word.pos?.[0]?.tag || '', zh: word.meaningZh, def: '' });
   }
-  // 打开时的释义快照：保存时用它判断「到底有没有改动」，没改动就不算手动编辑
-  const sig = (arr) => JSON.stringify(arr.map((x) => ({
-    pos: String(x.pos || '').toLowerCase(),
-    zh: String(x.zh || '').trim(),
-    def: String(x.def || '').trim(),
-    example: String(x.example || '').trim(),
-  })));
-  const seedSig = sig(seed);
+  // 「到底改没改」的基准：优先用词典/AI 最近一次给出的原始顺序（autoSig），
+  // 老数据没有 autoSig 时退回「打开弹窗时的内容」。
+  const seedSig = word.autoSig || sensesSig(seed);
 
   // 整张卡片都能拖（输入框、按钮除外）：拖动时卡片「浮」起来跟着指针走，原位留一个占位
   function attachDrag(card) {
@@ -851,6 +847,10 @@ export function openWordDetail(wordId, bookId) {
         window.removeEventListener('pointermove', onMove);
         window.removeEventListener('pointerup', onUp);
         window.removeEventListener('pointercancel', onUp);
+        if (!moving) { card.style.cssText = ''; return; }
+
+        // FLIP：记下「浮着」时的位置，落位后从这个位置滑回虚框，动画更顺
+        const fromRect = card.getBoundingClientRect();
         card.classList.remove('dragging');
         card.style.cssText = '';
         if (ghost && ghost.parentNode) {
@@ -858,6 +858,31 @@ export function openWordDetail(wordId, bookId) {
           ghost.remove();
         }
         paintTags();
+        const toRect = card.getBoundingClientRect();
+        const dx = fromRect.left - toRect.left;
+        const dy = fromRect.top - toRect.top;
+        const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        if (!reduce && (Math.abs(dx) > 1 || Math.abs(dy) > 1)) {
+          card.style.zIndex = '40';
+          card.style.transition = 'none';
+          card.style.transform = `translate(${dx}px, ${dy}px) scale(1.015)`;
+          card.style.boxShadow = '0 16px 32px -14px rgba(32, 29, 25, .4)';
+          void card.offsetHeight; // 先让起始位置生效，再开始过渡
+          setTimeout(() => {
+            const done = () => {
+              card.style.transition = '';
+              card.style.transform = '';
+              card.style.boxShadow = '';
+              card.style.zIndex = '';
+              card.removeEventListener('transitionend', done);
+            };
+            card.style.transition = 'transform .19s cubic-bezier(.2, .85, .3, 1), box-shadow .19s ease';
+            card.style.transform = '';
+            card.style.boxShadow = '';
+            card.addEventListener('transitionend', done);
+            setTimeout(done, 340);
+          }, 16);
+        }
       };
 
       window.addEventListener('pointermove', onMove);
@@ -1038,6 +1063,7 @@ export function openWordDetail(wordId, bookId) {
         patch.senses = data.senses?.length ? data.senses : word.senses;
         patch.meaningZh = data.meaningZh || word.meaningZh;
         patch.sensesManual = false;
+        patch.autoSig = sensesSig(patch.senses || []);
       }
       updateWord(wordId, patch);
       ref.close();
@@ -1066,13 +1092,14 @@ export function openWordDetail(wordId, bookId) {
       .filter((s) => s.zh || s.pos);
     const meaningZh = out.map((s) => s.zh).filter(Boolean).slice(0, 4).join('；');
     const tags = Array.from(new Set(out.map((s) => s.pos).filter(Boolean)));
-    // 加了又删、改了又改回去 → 内容与打开时一致，就不打「手动编辑」标记
-    const changed = sig(out) !== seedSig;
+    // 加了又删、拖乱了又拖回原样 → 与词典给的原顺序一致，就不算手动编辑。
+    // 有 autoSig（词典/AI 给的原始顺序）时完全按内容判断；老数据没有基线，只增不减。
+    const changed = sensesSig(out) !== seedSig;
     updateWord(wordId, {
       senses: out,
       meaningZh,
       pos: tags.length ? tags.map((t) => ({ tag: t })) : word.pos,
-      sensesManual: changed ? true : !!word.sensesManual,
+      sensesManual: word.autoSig ? changed : (changed || !!word.sensesManual),
       enrichState: out.length ? 'done' : word.enrichState,
     });
     toast('已保存', 'success');
