@@ -1,6 +1,6 @@
 /* 词典查询：音标 / 发音 / 词性 / 多义项中文释义 */
 
-const CACHE_KEY = 'vn.dict.cache.v2';
+const CACHE_KEY = 'vn.dict.cache.v3';
 const NOTFOUND_TTL = 10 * 60 * 1000;
 const CACHE_TTL = 1000 * 60 * 60 * 24 * 30;
 const MAX_SENSES = 4;
@@ -29,8 +29,8 @@ export async function fetchDictionary(term, { force = false } = {}) {
 
   const url = `https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(k)}`;
   let lastErr = null;
-  // 这个免费接口偶尔会拒绝并发/被限流，失败时重试一次，避免单词直接留空
-  for (let attempt = 0; attempt < 2; attempt++) {
+  // 这个免费接口偶尔会拒绝并发/被限流，失败时退避重试，避免单词直接留空
+  for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const res = await fetch(url);
       if (res.status === 404) {
@@ -47,25 +47,70 @@ export async function fetchDictionary(term, { force = false } = {}) {
       return data;
     } catch (e) {
       lastErr = e;
-      if (attempt === 0) await wait(700);
+      if (attempt < 2) await wait(600 + attempt * 800);
     }
   }
   throw lastErr || new Error('词典查询失败');
+}
+
+// 常见词性的排列（定义条数打平时用它兜底）
+const POS_ORDER = [
+  'noun', 'verb', 'adjective', 'adverb', 'pronoun', 'preposition',
+  'conjunction', 'interjection', 'determiner', 'numeral', 'article', 'auxiliary verb',
+];
+// Wiktionary 里有大量「用法说明」并不是释义本身
+const USAGE_NOTE = /^(preceded by|followed by|usually|often|chiefly|mainly|used |sometimes|esp\.? |especially |as |in the phrase|short for|alternative form of|alternative spelling of|plural of|past participle of|past tense of|present participle of|third-person singular|nonstandard spelling|misspelling|obsolete|archaic|initialism|abbreviation|see )/i;
+
+// 有些字体缺 IPA 的 ɹ / ɡ 等字形，显示成怪字符；换成常见写法更稳
+const PHONETIC_MAP = { 'ɹ': 'r', 'ɡ': 'g', 'ɴ': 'n', 'ʙ': 'b', 'ʀ': 'r', 'ɫ': 'l' };
+
+function normalizePhonetic(text) {
+  const t = String(text || '').trim();
+  if (!t) return '';
+  return t.replace(/[ɹɡɴʙʀɫ]/g, (c) => PHONETIC_MAP[c] || c);
+}
+
+/** 过滤掉「To run.」这类自我指向和纯用法说明，否则会顶掉真正的释义 */
+function isUsefulDefinition(def, term) {
+  const d = String(def || '').replace(/\s+/g, ' ').trim();
+  if (d.length < 4) return false;
+  if (USAGE_NOTE.test(d)) return false;
+  const t = String(term || '').trim().toLowerCase();
+  const bare = d.replace(/^to\s+/i, '').replace(/[.。]$/, '').trim().toLowerCase();
+  if (!t) return true;
+  if (bare === t) return false;
+  if (bare === `${t} up` || bare === `${t} down`) return false;
+  return true;
+}
+
+/** 把整句译文压成词典式的短释义 */
+function toGloss(text, maxLen = 16) {
+  let t = String(text || '').replace(/\s+/g, ' ').trim();
+  t = t.replace(/^[，。；、,.;:\s]+/, '').replace(/[。.！!]+$/, '').trim();
+  const cut = t.split(/[，；;,]/).map((x) => x.trim()).filter(Boolean)[0];
+  if (cut && cut.length >= 2) t = cut;
+  return t.length > maxLen ? `${t.slice(0, maxLen)}…` : t;
 }
 
 function normalizeDictionary(json, term) {
   const entries = Array.isArray(json) ? json : [];
   if (!entries.length) return { found: false, reason: 'notfound' };
 
-  // 音标与音频可能分散在任意一个条目里，全部扫一遍（原来只读第一条，导致部分单词没有音标）
-  let phonetic = '';
+  // 音标与音频可能分散在任意一个条目里，全部扫一遍（原来只读第一条，导致部分单词没有音标）。
+  // 音标取出现次数最多的写法：同一个词常有 /ɹʊn/、/ɹʌn/ 多个方言变体，众数更可信。
+  const textCount = new Map();
   let audio = '';
   for (const e of entries) {
-    if (!phonetic && e.phonetic) phonetic = e.phonetic;
+    if (e.phonetic) textCount.set(e.phonetic, (textCount.get(e.phonetic) || 0) + 0.5);
     for (const p of e.phonetics || []) {
-      if (!phonetic && p.text) phonetic = p.text;
+      if (p.text) textCount.set(p.text, (textCount.get(p.text) || 0) + 1);
       if (!audio && p.audio) audio = p.audio;
     }
+  }
+  let phonetic = '';
+  let best = -1;
+  for (const [text, n] of textCount) {
+    if (n > best) { best = n; phonetic = text; }
   }
 
   const buckets = [];
@@ -75,12 +120,14 @@ function normalizeDictionary(json, term) {
       const tag = m.partOfSpeech || '';
       let bucket = byTag.get(tag);
       if (!bucket) {
-        bucket = { tag, defs: [], synonyms: [], antonyms: [] };
+        bucket = { tag, defs: [], synonyms: [], antonyms: [], weight: 0 };
         byTag.set(tag, bucket);
         buckets.push(bucket);
       }
-      for (const d of m.definitions || []) {
-        if (bucket.defs.length < 4 && d.definition) {
+      const all = m.definitions || [];
+      bucket.weight += all.length;
+      for (const d of all) {
+        if (bucket.defs.length < 8 && d.definition && isUsefulDefinition(d.definition, term)) {
           bucket.defs.push({ definition: d.definition, example: d.example || '' });
         }
       }
@@ -89,15 +136,21 @@ function normalizeDictionary(json, term) {
     }
   }
 
-  // 每个词性取一条代表释义作为「义项」，最多 4 条
-  const senses = buckets.slice(0, MAX_SENSES).map((b) => ({
+  // 每个词性取一条代表释义作为「义项」，最多 4 条。
+  // 排序按「该词性下的释义条数」降序：词典接口给的词性顺序不按常用度，
+  // 直接切前几个会把罕用词性（如 happy 的 noun、big 的 verb）排到最前面。
+  const usable = buckets
+    .filter((b) => b.defs.length)
+    .sort((a, b) => b.weight - a.weight
+      || POS_ORDER.indexOf(a.tag) - POS_ORDER.indexOf(b.tag));
+  const senses = usable.slice(0, MAX_SENSES).map((b) => ({
     pos: b.tag,
     def: b.defs[0]?.definition || '',
     example: b.defs[0]?.example || '',
     zh: '',
   }));
 
-  return { found: true, term: entries[0].word || term, phonetic, audio, pos: buckets, senses };
+  return { found: true, term: entries[0].word || term, phonetic: normalizePhonetic(phonetic), audio, pos: buckets, senses };
 }
 
 /** 只接受像中文的短释义，避免接口异常时把 JSON 之类的东西写进释义 */
@@ -189,27 +242,32 @@ export async function translateSenses(term, senses, aiClient = null) {
     }
   }
 
-  // 没有 AI 时的免费回退：首义项用词条主译（多义词表里第一个），
-  // 其余义项各自翻译它自己的英文释义——按释义翻才不会有词性串味。
+  // 没有 AI 时的免费回退：每个义项翻译它自己的英文释义，再压成短释义。
+  // 不先用词条主译——MyMemory 的主译常常跑偏（run 会给出「得分」），
+  // 按释义翻虽然啰嗦，但至少词性、语义都对得上。
   if (list.some((s) => !s.zh)) {
-    let glosses = [];
-    try { glosses = await myMemoryGlosses(term); } catch (e) { glosses = []; }
-    if (!list[0].zh && glosses[0]) list[0].zh = glosses[0];
-    for (let i = 1; i < list.length; i++) {
-      const s = list[i];
+    for (const s of list) {
       if (s.zh || !s.def) continue;
       const sent = await myMemoryTranslate(s.def);
-      const z = sanitizeZh(sent, 40);
-      if (z) s.zh = trimZh(z);
+      const z = sanitizeZh(sent, 60);
+      if (z) s.zh = toGloss(z);
+    }
+    // 实在译不出来，才退回到词条主译
+    if (list.some((s) => !s.zh)) {
+      let glosses = [];
+      try { glosses = await myMemoryGlosses(term); } catch (e) { glosses = []; }
+      for (const s of list) {
+        if (!s.zh && glosses.length) s.zh = toGloss(glosses.shift());
+      }
     }
   }
 
-  // 仍然缺中文的义项：翻译英文释义本身
+  // 仍然缺中文的义项：再兜一次
   for (const s of list) {
     if (!s.zh && s.def) {
       const sent = await myMemoryTranslate(s.def);
-      const z = sanitizeZh(sent, 40);
-      if (z) s.zh = trimZh(z);
+      const z = sanitizeZh(sent, 60);
+      if (z) s.zh = toGloss(z);
     }
   }
 

@@ -1080,6 +1080,10 @@ a { color: var(--accent); }
 
   .toolbar { padding: 0 16px 10px; gap: 8px; }
   .search-box { max-width: none; flex: 1 1 100%; order: -1; }
+  /* 手机上让「排序 / 全部重新获取 / 条数」尽量挤在同一行 */
+  .toolbar .spacer { display: none; }
+  .toolbar .result-count { margin-left: auto; }
+  .toolbar .btn-sm { padding: 7px 10px; font-size: 12px; }
 
   .content { padding: 0 16px 90px; }
 

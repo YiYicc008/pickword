@@ -225,7 +225,7 @@ async function fillMissing(bookId, btn) {
     } catch (e) {
       console.warn('[fill]', w.term, e);
     }
-    await new Promise((r) => setTimeout(r, 250));
+    await new Promise((r) => setTimeout(r, 420));
   }
   btn.disabled = false;
   btn.innerHTML = original;
@@ -235,6 +235,68 @@ async function fillMissing(bookId, btn) {
     filled ? 'success' : 'default',
     3200
   );
+}
+
+/* 全部重新获取：把本单词本所有单词重新查一遍词典 */
+const NL = String.fromCharCode(10);
+let refetchState = { running: false, cancel: false, done: 0, total: 0, bookId: null };
+let syncRefetchButton = () => {};
+
+async function refetchAll(bookId) {
+  if (refetchState.running) { refetchState.cancel = true; return; }
+  const words = getEntriesOfBook(bookId).map((x) => x.word).filter(Boolean);
+  if (!words.length) { toast('这个单词本还没有单词', 'default'); return; }
+  const book = getBook(bookId);
+  const ok = await confirmDialog({
+    title: '全部重新获取',
+    message: [
+      `将重新查询「${book ? book.name : '当前单词本'}」里全部 ${words.length} 个单词的音标、发音、词性和中文释义。`,
+      '',
+      '· 词典接口有限速，会逐个查询，大约几十秒到几分钟；',
+      '· 查询过程中单词会一个个更新，可以随时点「取消」停下；',
+      '· 查不到的词保留原来的内容，不会变空；',
+      '· 手动改过的中文释义会被新查到的结果覆盖。',
+    ].join(NL),
+    confirmText: '开始重新获取',
+  });
+  if (!ok) return;
+
+  refetchState = { running: true, cancel: false, done: 0, total: words.length, bookId };
+  syncRefetchButton();
+  let updated = 0;
+  let failed = 0;
+
+  for (const w of words) {
+    if (refetchState.cancel) break;
+    try {
+      const data = await enrichTerm(w.term, { aiClient: aiClientFor(), useDictApi: true, force: true });
+      const patch = {};
+      if (data.phonetic) patch.phonetic = data.phonetic;
+      if (data.audio) patch.audio = data.audio;
+      if (data.pos?.length) patch.pos = data.pos;
+      if (data.senses?.length) patch.senses = data.senses;
+      if (data.meaningZh) patch.meaningZh = data.meaningZh;
+      patch.enrichState = data.enrichState || 'done';
+      if (Object.keys(patch).length > 1) { updateWord(w.id, patch); updated++; }
+      else failed++;
+    } catch (e) {
+      console.warn('[refetch]', w.term, e);
+      failed++;
+    }
+    refetchState.done++;
+    if (refetchState.bookId === vs.bookId && vs.view === 'list') renderListOnly();
+    syncRefetchButton();
+    await new Promise((r) => setTimeout(r, 420));
+  }
+
+  const cancelled = refetchState.cancel;
+  refetchState.running = false;
+  renderAfterDataChange();
+  let msg;
+  if (cancelled) msg = `已停止，更新了 ${updated} 个单词`;
+  else if (failed) msg = `已更新 ${updated} 个单词，${failed} 个没查到（保留原内容）`;
+  else msg = `已更新 ${updated} 个单词`;
+  toast(msg, updated ? 'success' : 'default', 3600);
 }
 
 let syncFillButton = () => {};
@@ -280,6 +342,11 @@ export function renderToolbar() {
   syncFillButton = () => paintFillButton();
   paintFillButton();
 
+  const refetchHost = el('span', { id: 'refetch-host' });
+  bar.appendChild(refetchHost);
+  syncRefetchButton = () => paintRefetchButton();
+  paintRefetchButton();
+
   const count = el('span', { class: 'result-count', id: 'result-count' });
   bar.appendChild(count);
   updateCount();
@@ -296,6 +363,27 @@ export function renderToolbar() {
     fillBtn.title = '为缺少音标或释义的单词重新查询词典';
     fillBtn.addEventListener('click', () => fillMissing(vs.bookId, fillBtn));
     fillHost.appendChild(fillBtn);
+  }
+
+  function paintRefetchButton() {
+    refetchHost.innerHTML = '';
+    if (!refetchHost.isConnected) return;
+    if (!getEntriesOfBook(vs.bookId).length) return;
+    const mine = refetchState.running && refetchState.bookId === vs.bookId;
+    const btn = el('button', { class: 'btn btn-quiet btn-sm', id: 'btn-refetch' });
+    if (mine) {
+      btn.innerHTML = icon('x', 14) + `<span>取消 · ${refetchState.done}/${refetchState.total}</span>`;
+      btn.title = '点击停止本次重新获取';
+      btn.addEventListener('click', () => { refetchState.cancel = true; paintRefetchButton(); });
+    } else if (refetchState.running) {
+      btn.disabled = true;
+      btn.innerHTML = `<span>正在刷新另一个单词本…</span>`;
+    } else {
+      btn.innerHTML = icon('refresh', 14) + '<span>全部重新获取</span>';
+      btn.title = '对本单词本的每个单词重新查询词典（音标、发音、词性、多义项释义）';
+      btn.addEventListener('click', () => refetchAll(vs.bookId));
+    }
+    refetchHost.appendChild(btn);
   }
 }
 
@@ -335,6 +423,7 @@ export function renderListOnly() {
   const items = listData();
   updateCount();
   syncFillButton();
+  syncRefetchButton();
   if (!items.length) {
     host.appendChild(vs.query.trim() ? noResultState() : emptyState());
     return;
@@ -371,16 +460,27 @@ function renderRow({ entry, word }) {
   const body = el('div', { class: 'word-body' });
   const senses = Array.isArray(word.senses) ? word.senses.filter((s) => s && (s.zh || s.def)) : [];
   if (senses.length) {
-    // 一个词性一条：词性标签 + 该义项的中文，最多显示两条
-    for (const s of senses.slice(0, 2)) {
+    // 一个词性一条：词性标签 + 该义项的中文，最多显示两条；
+    // 中文重复的义项（v. 开始 / n. 开始）在列表里只留第一条，免得看着像重复
+    const shown = [];
+    const seen = new Set();
+    for (const s of senses) {
+      const zh = s.zh || s.def || '';
+      if (seen.has(zh)) continue;
+      if (shown.length >= 2) break;
+      seen.add(zh);
+      shown.push(s);
+    }
+    const hidden = senses.length - shown.length;
+    for (const s of shown) {
       const line = el('div', { class: 'pos-line sense' });
       const ab = posAbbr(s.pos);
       if (ab) line.appendChild(el('span', { class: `pos-tag ${posClass(ab)}`, text: ab }));
       line.appendChild(el('span', { class: 'meaning-zh', text: s.zh || s.def || '' }));
       body.appendChild(line);
     }
-    if (senses.length > 2) {
-      body.appendChild(el('div', { class: 'pos-line more-note', text: `还有 ${senses.length - 2} 个义项` }));
+    if (hidden > 0) {
+      body.appendChild(el('div', { class: 'pos-line more-note', text: `还有 ${hidden} 个义项` }));
     }
   } else {
     const posLine = el('div', { class: 'pos-line' });

@@ -146,7 +146,7 @@ export function confirmDialog({ title, message, confirmText = '确认', cancelTe
 
     const ref = openModal({
       title,
-      body: el('p', { text: message, style: 'margin:0 0 6px;font-size:14px;color:var(--ink-2);line-height:1.7' }),
+      body: el('p', { text: message, style: 'margin:0 0 6px;font-size:14px;color:var(--ink-2);line-height:1.7;white-space:pre-line' }),
       footer: foot,
       onClose: () => { if (!settled) { settled = true; resolve(false); } },
     });
