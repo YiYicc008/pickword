@@ -1,6 +1,7 @@
 /* 云同步：Supabase（Auth + PostgREST），不依赖 SDK，全部走原生 fetch */
 
 import { getSettings, updateSettings, exportJSON, importJSON } from './store.js';
+import { SITE } from './config.js';
 
 const AUTH_KEY = 'vn.auth.v1';
 
@@ -8,9 +9,14 @@ const AUTH_KEY = 'vn.auth.v1';
 
 export function syncConfig() {
   const s = getSettings();
-  const url = String(s.supabaseUrl || '').trim().replace(/\/+$/, '');
-  const key = String(s.supabaseKey || '').trim();
-  return { url, key, ready: /^https?:\/\//.test(url) && key.length > 20 };
+  const ownUrl = String(s.supabaseUrl || '').trim().replace(/\/+$/, '');
+  const ownKey = String(s.supabaseKey || '').trim();
+  if (/^https?:\/\//.test(ownUrl) && ownKey.length > 20) {
+    return { url: ownUrl, key: ownKey, ready: true, builtin: false };
+  }
+  const url = String(SITE.supabaseUrl || '').trim().replace(/\/+$/, '');
+  const key = String(SITE.supabaseAnonKey || '').trim();
+  return { url, key, ready: /^https?:\/\//.test(url) && key.length > 20, builtin: true };
 }
 
 export const SYNC_SQL = `-- 在 Supabase → SQL Editor 中执行一次
@@ -49,6 +55,7 @@ export function authSummary() {
   return {
     email: a.user.email || '',
     uid: a.user.id,
+    anon: Boolean(a.user.is_anonymous),
     since: a.created_at || null,
     lastSyncAt: getSettings().lastSyncAt || null,
   };
@@ -85,6 +92,9 @@ function friendly(status, data) {
   if (status === 400 && /invalid login credentials/i.test(String(msg))) return '邮箱或密码不正确';
   if (status === 422 || /already registered/i.test(String(msg))) return '这个邮箱已经注册过了，请直接登录';
   if (status === 401) return '登录已过期，请重新登录';
+  if (code === 'anonymous_provider_disabled' || /anonymous.*disabled/i.test(String(msg))) {
+    return '该项目未开启匿名登录：Supabase → Authentication → Sign In / Providers → 打开 Anonymous sign-ins 后重试';
+  }
   return msg ? `${status}：${msg}` : `请求失败（${status}）`;
 }
 
@@ -123,6 +133,28 @@ export async function signUp(email, password) {
     return { needConfirm: false, summary: authSummary() };
   }
   return { needConfirm: true, summary: null };
+}
+
+/**
+ * 匿名登录：无需邮箱与密码，Supabase 为当前浏览器分配一个独立用户，
+ * 数据仍按 RLS 隔离（user_id = auth.uid()）。
+ * 需要在该项目的 Authentication → Sign In / Providers 中开启 Anonymous sign-ins。
+ * 匿名账号仅限本设备；如需跨设备共享，请改用邮箱注册。
+ */
+export async function signInAnon() {
+  const data = await request('/auth/v1/signup', {
+    method: 'POST',
+    body: { data: {}, gotrue_meta_security: {} },
+  });
+  if (!data?.access_token) throw new Error('匿名登录失败，请检查项目设置');
+  saveAuth({
+    access_token: data.access_token,
+    refresh_token: data.refresh_token,
+    expires_at: Date.now() + (data.expires_in || 3600) * 1000,
+    user: data.user,
+    created_at: Date.now(),
+  });
+  return authSummary();
 }
 
 export function signOut() {

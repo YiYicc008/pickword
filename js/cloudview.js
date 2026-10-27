@@ -14,7 +14,7 @@ import { hasAI, buildRelations, buildClouds } from './ai.js';
 import { vs } from './viewstate.js';
 import { openWordDetail } from './views.js';
 import { posAbbr, posClass, weightClass } from './format.js';
-import { speak, playAudio } from './dict.js';
+import { pronounce } from './dict.js';
 
 const NONE_ID = '__unclustered__';
 const NONE_COLOR = '#b7ae9f';
@@ -236,8 +236,7 @@ export function renderCloudView(host) {
     const sp = el('button', { class: 'speak-btn', title: '发音' });
     sp.innerHTML = icon('volume', 13);
     sp.addEventListener('click', () => {
-      if (word.audio && playAudio(word.audio)) return;
-      speak(word.term, getSettings().ttsRate);
+      pronounce(word.term, { audio: word.audio, rate: getSettings().ttsRate });
     });
     head.appendChild(sp);
     const wp = el('span', { class: `weight-pill ${weightClass(entry.weight)}`, text: String(entry.weight) });

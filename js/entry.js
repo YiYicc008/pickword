@@ -3,7 +3,7 @@
 import { getBooks, addTerm, updateWord, getWordByTerm, getBooksOfWord, getSettings } from './store.js';
 import { icon, toast, openModal } from './ui.js';
 import { el, debounce, looksEnglish } from './util.js';
-import { enrichTerm, speak } from './dict.js';
+import { enrichTerm, pronounce } from './dict.js';
 import { hasAI, classifyWord, translateWord, translateSenses, describeWord } from './ai.js';
 import { vs } from './viewstate.js';
 import { posAbbr, sensesSig } from './format.js';
@@ -115,7 +115,7 @@ export function openAddWordDialog({ preselectBookId = null, initialTerm = '' } =
       const sp = el('button', { class: 'speak-btn', title: '发音' });
       sp.innerHTML = icon('volume', 14);
       sp.addEventListener('click', () => {
-        if (!(state.audio && speakAudio(state.audio))) speak(term, getSettings().ttsRate);
+        pronounce(term, { audio: state.audio, rate: getSettings().ttsRate });
       });
       head.appendChild(sp);
     }
@@ -152,13 +152,6 @@ export function openAddWordDialog({ preselectBookId = null, initialTerm = '' } =
       card.appendChild(el('div', { class: 'preview-state', text: '已关闭自动释义，可添加后在详情里补充' }));
     }
     previewHost.appendChild(card);
-  }
-
-  function speakAudio(url) {
-    try {
-      new Audio(url).play().catch(() => {});
-      return true;
-    } catch { return false; }
   }
 
   /* 自动补全信息 */

@@ -10,11 +10,11 @@ import {
 import { vs, selectBook } from './viewstate.js';
 import { icon, toast, openModal, confirmDialog, promptDialog } from './ui.js';
 import { $, el, formatDate, relativeTime, esc } from './util.js';
-import { speak, playAudio, enrichTerm, missingInfo, wasRateLimited } from './dict.js';
+import { pronounce, enrichTerm, missingInfo, wasRateLimited } from './dict.js';
 import { openAddWordDialog } from './entry.js';
 import { PROVIDERS, hasAI, testConnection, translateWord, translateSenses, describeWord } from './ai.js';
 import {
-  syncNow, pullRemote, pushOverride, signIn, signUp, signOut,
+  syncNow, pullRemote, pushOverride, signIn, signUp, signInAnon, signOut,
   authSummary, syncConfig, SYNC_SQL,
 } from './sync.js';
 
@@ -617,8 +617,7 @@ function renderRow({ entry, word }) {
   speakBtn.innerHTML = icon('volume', 14);
   speakBtn.addEventListener('click', (e) => {
     e.stopPropagation();
-    if (word.audio) { if (!playAudio(word.audio)) speak(word.term, getSettings().ttsRate); }
-    else speak(word.term, getSettings().ttsRate);
+    pronounce(word.term, { audio: word.audio, rate: getSettings().ttsRate });
   });
   main.appendChild(speakBtn);
 
@@ -781,8 +780,7 @@ export function openWordDetail(wordId, bookId) {
   const sp = el('button', { class: 'speak-btn', title: '发音' });
   sp.innerHTML = icon('volume', 15);
   sp.addEventListener('click', () => {
-    if (word.audio) { if (!playAudio(word.audio)) speak(word.term, getSettings().ttsRate); }
-    else speak(word.term, getSettings().ttsRate);
+    pronounce(word.term, { audio: word.audio, rate: getSettings().ttsRate });
   });
   headTop.appendChild(sp);
   head.appendChild(headTop);
@@ -1231,7 +1229,7 @@ export function openSettingsDialog() {
   /* 同步 */
   const syncSec = el('div', { class: 'settings-section' });
   syncSec.appendChild(el('h3', { text: '云同步' }));
-  syncSec.appendChild(el('p', { text: '配置 Supabase 后，可在 Windows、iPad、鸿蒙三端登录同一个账号并同步数据。' }));
+  syncSec.appendChild(el('p', { text: '配置 Supabase 后，可在多台设备上登录同一个账号并同步数据。' }));
   const syncBtn = el('button', { class: 'btn btn-quiet' });
   syncBtn.innerHTML = icon('sync', 15) + '<span>配置云同步</span>';
   syncBtn.addEventListener('click', () => { ref.close(); openSyncDialog(); });
@@ -1264,11 +1262,20 @@ export function openSyncDialog() {
   /* ---------- 1. 项目配置 ---------- */
   const cfgSec = el('div', { class: 'settings-section' });
   cfgSec.appendChild(el('h3', { text: '1 · Supabase 项目' }));
-  cfgSec.appendChild(el('p', {
-    text: '在 supabase.com 免费建一个项目，复制 Project URL 与 anon public key 填进来。三端填同一套配置、登录同一个账号，就能共享同一份单词本。',
-  }));
+  const cfgPara = el('p', {
+    text: '在 supabase.com 免费建一个项目，复制 Project URL 与 anon public key 填进来。各设备填同一套配置、登录同一个账号，即可共享同一份单词本。',
+  });
+  cfgSec.appendChild(cfgPara);
 
   const s = getSettings();
+  const cfgNow = syncConfig();
+  if (cfgNow.builtin && cfgNow.ready) {
+    cfgSec.appendChild(el('p', {
+      style: 'margin:0 0 8px;color:var(--ink-2);font-size:12.5px',
+      text: '本站已内置云服务，无需填写项目地址与密钥；直接在第 2 段登录即可使用。',
+    }));
+    body.appendChild(cfgSec);
+  }
   const urlInput = el('input', {
     class: 'text-input', placeholder: 'https://xxxxxxxx.supabase.co', value: s.supabaseUrl || '',
     autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false',
@@ -1287,6 +1294,12 @@ export function openSyncDialog() {
     cfgState.textContent = c.ready ? '✓ 已保存' : 'URL 或 key 看起来不完整';
   });
   cfgRow.append(saveCfg, cfgState);
+  if (cfgNow.builtin && cfgNow.ready) {
+    cfgPara.style.display = 'none';
+    urlInput.style.display = 'none';
+    keyInput.style.display = 'none';
+    cfgRow.style.display = 'none';
+  }
   cfgSec.append(urlInput, keyInput, cfgRow);
   body.appendChild(cfgSec);
 
@@ -1310,9 +1323,10 @@ export function openSyncDialog() {
   const authRow = el('div', { style: 'display:flex;gap:9px;margin-top:11px;align-items:center;flex-wrap:wrap' });
   const loginBtn = el('button', { class: 'btn btn-primary', text: '登录' });
   const signupBtn = el('button', { class: 'btn btn-quiet', text: '注册新账号' });
+  const anonBtn = el('button', { class: 'btn btn-quiet', text: '免注册使用（匿名）' });
   const outBtn = el('button', { class: 'btn btn-quiet', text: '退出登录' });
   const accMsg = el('span', { style: 'font-size:12px;color:var(--ink-3);flex:1;min-width:0' });
-  authRow.append(loginBtn, signupBtn, outBtn, accMsg);
+  authRow.append(loginBtn, signupBtn, anonBtn, outBtn, accMsg);
   accSec.append(form, authRow);
   body.appendChild(accSec);
 
@@ -1363,16 +1377,20 @@ export function openSyncDialog() {
     form.style.display = logged ? 'none' : '';
     loginBtn.style.display = logged ? 'none' : '';
     signupBtn.style.display = logged ? 'none' : '';
+    anonBtn.style.display = logged ? 'none' : '';
     outBtn.style.display = logged ? '' : 'none';
     syncSec.style.display = logged ? '' : 'none';
 
     if (auth) {
-      accInfo.textContent = `已登录：${auth.email}`;
+      accInfo.textContent = auth.anon
+        ? '已登录：匿名账号（仅本设备）'
+        : `已登录：${auth.email}`;
       syncInfo.textContent = auth.lastSyncAt
         ? `上次同步：${relativeTime(auth.lastSyncAt)}。同步会把云端与这台设备的数据合并（权重取较大值），再整体回传。`
         : '还没有同步过。建议先在一台设备上点「上传本机」，其他设备再点「立即同步」拉取。';
     } else {
-      accInfo.textContent = '用邮箱注册一个账号；三端登录同一个账号即可同步。';
+      accInfo.textContent = '用邮箱注册一个账号，各设备登录同一个账号即可同步；'
+        + '也可点「免注册使用（匿名）」，无需邮箱，仅本设备生效。';
     }
   }
 
@@ -1390,6 +1408,18 @@ export function openSyncDialog() {
       } finally { btn.disabled = false; btn.innerHTML = old; }
     };
   }
+
+  anonBtn.addEventListener('click', wrapBusy(anonBtn, async () => {
+    const c = syncConfig();
+    if (!c.ready) throw new Error('请先填写并保存 Supabase 配置');
+    accMsg.style.color = 'var(--ink-3)';
+    accMsg.textContent = '正在建立匿名账号…';
+    await signInAnon();
+    refreshAuth();
+    accMsg.style.color = 'var(--green)';
+    accMsg.textContent = '已建立匿名账号，可直接同步';
+    toast('已建立匿名账号', 'success');
+  }));
 
   loginBtn.addEventListener('click', wrapBusy(loginBtn, async () => {
     const email = emailInput.value.trim();
@@ -1484,13 +1514,13 @@ export function openSyncDialog() {
   foot.appendChild(close);
 
   refreshAuth();
-  const ref = openModal({ title: '云同步', subtitle: 'Windows · 鸿蒙 · iPad 共用一份单词本', body, footer: foot, wide: true });
+  const ref = openModal({ title: '云同步', subtitle: '多台设备共用一份单词本', body, footer: foot, wide: true });
   close.addEventListener('click', () => ref.close());
 }
 export function openAboutDialog() {
   const body = el('div', {});
   body.appendChild(el('p', {
-    text: '一个可以在 Windows、iPad、鸿蒙三端使用的电子英语单词本。数据默认保存在本机，可离线使用；配置 Supabase 后三端共享同一份单词本。',
+    text: '一个在浏览器中运行的电子英语单词本：桌面、平板与手机均可使用。数据默认保存在本机，可离线使用；配置 Supabase 后多台设备共享同一份单词本。',
     style: 'font-size:13.5px;color:var(--ink-2);line-height:1.8;margin:0 0 16px',
   }));
   const list = el('div', { style: 'display:flex;flex-direction:column;gap:10px;font-size:13px;color:var(--ink-2);line-height:1.7' });

@@ -468,6 +468,65 @@ export function speak(term, rate = 0.9) {
   }
 }
 
+/* ==================== 发音 ====================
+ * 在线音频优先（有道发音稳定、延迟低），失败再回退浏览器语音合成。
+ * 词典自带的 audio 字段（dictionaryapi.dev 的 CDN）经常 502，因此排在后面。
+ */
+
+const YOUDAO_VOICE = 'https://dict.youdao.com/dictvoice?audio=';
+
+/** 候选音频地址，按可靠性排序 */
+export function audioCandidates(term, extra) {
+  const t = String(term || '').trim();
+  if (!t) return [];
+  const q = encodeURIComponent(t);
+  const list = [
+    `${YOUDAO_VOICE}${q}&type=2`, // 美音
+    `${YOUDAO_VOICE}${q}&type=1`, // 英音
+    extra || '',
+  ];
+  return Array.from(new Set(list.filter(Boolean)));
+}
+
+/** 尝试播放一个音频地址，成功开始/可播放即 resolve(true) */
+function tryPlay(url, timeout = 5000) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (v) => { if (!settled) { settled = true; resolve(v); } };
+    try {
+      const a = new Audio();
+      a.preload = 'auto';
+      const ok = () => done(true);
+      // 只要音频能解码即视为可用（播放权限由触发点击的手势保证）
+      a.addEventListener('loadeddata', ok, { once: true });
+      a.addEventListener('canplay', ok, { once: true });
+      a.addEventListener('playing', ok, { once: true });
+      a.addEventListener('error', () => done(false), { once: true });
+      setTimeout(() => done(false), timeout);
+      a.src = url;
+      const p = a.play();
+      // 播放权限由用户点击的手势保证；这里只关心音频能否取到并解码
+      if (p && typeof p.catch === 'function') p.catch(() => {});
+    } catch {
+      done(false);
+    }
+  });
+}
+
+/**
+ * 播放单词发音：有道音频 → 词典音频 → 浏览器语音合成。
+ * 返回 'audio' | 'tts' | 'none'，便于界面给出提示。
+ */
+export async function pronounce(term, { audio = '', rate = 0.9 } = {}) {
+  const urls = audioCandidates(term, audio);
+  for (const url of urls) {
+    // 有道对不存在的词也会返回一小段音频，这里仅按能否播放判断
+    // eslint-disable-next-line no-await-in-loop
+    if (await tryPlay(url)) return 'audio';
+  }
+  return speak(term, rate) ? 'tts' : 'none';
+}
+
 export function playAudio(url) {
   if (!url) return false;
   try {
