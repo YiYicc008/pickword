@@ -89,7 +89,7 @@ def main():
     ips = lan_ips()
 
     print("=" * 62, flush=True)
-    print("  词汇 · 电子英语单词本", flush=True)
+    print("  拾词 · 电子英语单词本", flush=True)
     print("=" * 62, flush=True)
     print("")
     print(f"  本机访问（这台电脑）：{local}", flush=True)

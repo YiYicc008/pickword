@@ -1,6 +1,8 @@
-# 词汇 · 电子英语单词本
+# 拾词 · 电子英语单词本
 
-**一个可以在 Windows 电脑 / iPad / 鸿蒙手机上使用的电子英语单词本。**
+**拾词（Pickword）—— 一个可以在 Windows 电脑 / iPad / 鸿蒙手机上使用的电子英语单词本。**
+
+> 名字的来历：遇见一个词，**拾**起来放进本子；再遇见一次，它在那个本子里的权重就 +1。
 纯前端 PWA，零依赖、零构建：双击就能跑，也可以放到任意静态网站空间，用浏览器「添加到主屏幕」后像 App 一样使用。
 
 录入单词会自动补上音标、发音、词性和中文释义；每个单词带一个看得见的**权重**；
@@ -29,7 +31,7 @@
 | 三端 | 同一个网页适配桌面 / 平板 / 手机，可「添加到主屏幕」离线使用 |
 | 同步 | 可选 Supabase：邮箱登录，三端共享同一份数据 |
 
-> **在线试用**：部署到 GitHub Pages 后访问 `https://YiYicc008.github.io/vocabulary/index.html?demo`（带 `?demo` 会载入示例数据）。
+> **在线试用**：部署到 GitHub Pages 后访问 `https://YiYicc008.github.io/pickword/index.html?demo`（带 `?demo` 会载入示例数据）。
 > 没部署也能用：见下面「五分钟上手」。
 
 界面语言：简体中文　｜　代码：原生 JavaScript（ES Modules），零依赖、无构建步骤
@@ -50,7 +52,7 @@
 
 ```
 ==============================================================
-  词汇 · 电子英语单词本
+  拾词 · 电子英语单词本
 ==============================================================
 
   本机访问（这台电脑）：http://127.0.0.1:8080/index.html
@@ -219,7 +221,7 @@
 ### 1. 建一个 Supabase 项目（约 3 分钟）
 
 1. 打开 <https://supabase.com> → `Start your project`，用 GitHub 或邮箱注册（免费计划足够）；
-2. `New project`：填项目名（例如 `vocabulary`）、设置**数据库密码**（自己记好，一般用不到）、
+2. `New project`：填项目名（例如 `pickword`）、设置**数据库密码**（自己记好，一般用不到）、
    区域选离你近的（如 `Singapore` / `Tokyo`）→ `Create new project`，等 1–2 分钟初始化完成。
 
 ### 2. 拿到两个值
@@ -385,15 +387,15 @@ git revert <commit>        # 撤销某次提交
    ```bash
    git init
    git add .
-   git commit -m "init: 词汇 · 电子英语单词本"
+   git commit -m "init: 拾词 · 电子英语单词本"
    git branch -M main
-   git remote add origin https://github.com/YiYicc008/vocabulary.git
+   git remote add origin https://github.com/YiYicc008/pickword.git
    git push -u origin main
    ```
 
 2. 仓库 **Settings → Pages**：Source 选 `Deploy from a branch`，Branch 选 `main`、目录 `/(root)`，Save。
 
-3. 等一两分钟，访问 `https://YiYicc008.github.io/vocabulary/`。
+3. 等一两分钟，访问 `https://YiYicc008.github.io/pickword/`。
    想直接看示例数据就加 `?demo`：`…/index.html?demo`。
 
 4. iPad / 手机打开同一个地址 → 分享 → **添加到主屏幕**；Windows 上 Chrome / Edge 地址栏右侧的安装图标也能装。
@@ -408,7 +410,7 @@ git revert <commit>        # 撤销某次提交
 
 几点说明：
 
-- 所有资源都用相对路径，放在子目录（`https://…/vocabulary/`）也能正常工作；
+- 所有资源都用相对路径，放在子目录（`https://…/pickword/`）也能正常工作；
 - 根目录的 `.nojekyll` 用来跳过 Jekyll 处理，避免带下划线/特殊名字的文件被忽略；
 - 换成 Netlify / Vercel / Cloudflare Pages 也一样，都是纯静态托管，直接把文件夹拖进去即可；
 - 只想局域网用，就不必部署，双击 `start.bat` 后按窗口里打印的地址访问。

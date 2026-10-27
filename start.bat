@@ -1,6 +1,6 @@
 @echo off
 setlocal
-title Vocabulary - English Wordbook
+title Pickword - English Wordbook
 cd /d "%~dp0"
 
 set "PY="

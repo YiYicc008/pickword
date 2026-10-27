@@ -1,6 +1,6 @@
 /* 离线缓存：应用外壳缓存优先，导航请求走网络优先 + 离线兜底 */
 
-const VERSION = 'vn-v3';
+const VERSION = 'vn-v4';
 const CORE = [
   './',
   './index.html',

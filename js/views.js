@@ -1203,7 +1203,7 @@ export function openSettingsDialog() {
     const blob = new Blob([exportJSON()], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `词汇备份_${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = `拾词备份_${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 2000);
     toast('已导出', 'success');
@@ -1537,7 +1537,7 @@ export function openAboutDialog() {
   const ok = el('button', { class: 'btn btn-primary', text: '知道了' });
   foot.appendChild(ok);
 
-  const modal = openModal({ title: '关于「词汇」', body, footer: foot });
+  const modal = openModal({ title: '关于「拾词」', body, footer: foot });
   ok.addEventListener('click', () => modal.close());
   const close = () => modal.close();
 }

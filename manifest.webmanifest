@@ -1,6 +1,6 @@
 {
-  "name": "词汇 · 电子英语单词本",
-  "short_name": "词汇",
+  "name": "拾词 · 电子英语单词本",
+  "short_name": "拾词",
   "description": "多单词本、权重统计、词云关系图的电子英语单词本",
   "start_url": "./index.html",
   "scope": "./",
