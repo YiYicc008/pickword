@@ -1,13 +1,8 @@
-# 本地开发与验证产物，不进版本库
+# 本地临时文件与生成物：以下划线开头的文件与目录不进版本库
+_*
 .shots/
-_backups/
-_probe.html
+node_modules/
 *.log
-_snapshot.py
-_probe*.html
-_t_*.html
-_*check.html
-_icon.html
 
 # 系统 / 编辑器
 .DS_Store
