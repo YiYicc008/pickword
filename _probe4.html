@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>probe4</title>
+<style>
+  html, body { margin: 0; background: #d8d4cc; }
+  #frame { border: 0; position: absolute; left: 0; top: 0; }
+  #log { position: fixed; right: 0; bottom: 0; z-index: 9; font: 11px/1.5 monospace;
+         background: #fff; color: #201d19; padding: 6px 8px; white-space: pre; max-width: 100%; }
+</style>
+</head>
+<body>
+<iframe id="frame" width="1000" height="820" src="index.html?demo"></iframe>
+<pre id="log"></pre>
+<script>
+const frame = document.getElementById('frame');
+const logEl = document.getElementById('log');
+const lines = [];
+const log = (s) => { lines.push(s); logEl.textContent = lines.join('\n'); };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function state() {
+  return JSON.parse(localStorage.getItem('vn.demo.v2') || '{}');
+}
+
+async function run() {
+  const doc = frame.contentDocument;
+  const win = frame.contentWindow;
+
+  const add = async (word) => {
+    doc.querySelector('#topbar .btn-primary').click();
+    await sleep(250);
+    const input = doc.querySelector('.modal input.text-input');
+    input.focus();
+    input.value = word;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    await sleep(2600);
+    const preview = doc.querySelector('.modal .preview-card');
+    log('preview(' + word + ')=' + (preview ? preview.textContent.replace(/\s+/g, ' ').trim().slice(0, 70) : 'NONE'));
+    const foot = doc.querySelector('.modal .btn-primary');
+    foot.click();
+    await sleep(900);
+    log('modal closed=' + !doc.querySelector('.modal'));
+  };
+
+  await add('serendipity');
+  const rows = [...doc.querySelectorAll('.word-row')];
+  log('rows=' + rows.length + ' first=' + (rows[0] ? rows[0].textContent.replace(/\s+/g, ' ').trim() : ''));
+
+  await add('serendipity');
+  const st = state();
+  const word = (st.words || []).find((w) => w.term === 'serendipity');
+  const entries = (st.entries || []).filter((e) => word && e.wordId === word.id);
+  log('entries=' + entries.length + ' weights=' + entries.map((e) => e.weight).join(','));
+  log('books=' + (st.books || []).length + ' words=' + (st.words || []).length + ' entries=' + (st.entries || []).length);
+  const rowFor = [...doc.querySelectorAll('.word-row')].find((r) => r.textContent.includes('serendipity'));
+  log('row=' + (rowFor ? rowFor.textContent.replace(/\s+/g, ' ').trim() : 'NONE'));
+
+  const first = doc.querySelector('.word-row');
+  log('top row now=' + (first ? first.textContent.replace(/\s+/g, ' ').trim() : 'NONE'));
+
+  // 排序切换
+  const sel = doc.querySelector('#sort-select');
+  sel.value = 'time-desc';
+  sel.dispatchEvent(new Event('change', { bubbles: true }));
+  await sleep(400);
+  log('after sort change rows=' + doc.querySelectorAll('.word-row').length);
+}
+
+frame.addEventListener('load', () => setTimeout(() => {
+  run().catch((e) => log('SCENARIO ERROR ' + e.message + '\n' + e.stack));
+}, 1800));
+</script>
+</body>
+</html>

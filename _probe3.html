@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>probe3</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #d8d4cc; }
+  #frame { display: block; border: 0; position: absolute; left: 0; top: 0; background: #f6f2ea; }
+  #log { position: fixed; right: 0; bottom: 0; z-index: 9; font: 11px/1.4 monospace;
+         background: #fff9; color: #201d19; padding: 4px 6px; white-space: pre; }
+</style>
+</head>
+<body>
+<iframe id="frame"></iframe>
+<pre id="log"></pre>
+<script>
+const q = new URLSearchParams(location.search);
+const w = +(q.get('w') || 390);
+const h = +(q.get('h') || 844);
+const quiet = q.get('quiet') === '1';
+const sel = q.get('sel') || '';
+const delay = +(q.get('delay') || 1600);
+const frame = document.getElementById('frame');
+const log = document.getElementById('log');
+
+frame.width = w;
+frame.height = h;
+frame.style.width = w + 'px';
+frame.style.height = h + 'px';
+frame.src = q.get('src') || 'index.html?demo';
+
+function report(msg) {
+  log.textContent = quiet ? '' : msg;
+}
+
+frame.addEventListener('load', () => {
+  setTimeout(() => {
+    const doc = frame.contentDocument;
+    const lines = [];
+    try {
+      const vw = doc.documentElement.clientWidth;
+      const sw = doc.documentElement.scrollWidth;
+      lines.push('vw=' + vw + ' scroll=' + sw + ' over=' + (sw - vw));
+      const bad = [];
+      for (const el of doc.querySelectorAll('body *')) {
+        const r = el.getBoundingClientRect();
+        if (r.width > 0 && r.right > vw + 1 && el.tagName !== 'IFRAME') {
+          bad.push(el.tagName.toLowerCase() + '.' + (el.className || '').toString().split(' ')[0] +
+                    ' right=' + Math.round(r.right));
+        }
+      }
+      if (bad.length) lines.push('OVERFLOW:\n' + bad.slice(0, 12).join('\n'));
+      if (sel) {
+        const target = doc.querySelector(sel);
+        if (target) {
+          target.click();
+          lines.push('clicked ' + sel);
+        } else {
+          lines.push('MISS ' + sel);
+        }
+      }
+      if (q.get('js')) {
+        // eslint-disable-next-line no-new-func
+        new Function('doc', 'win', q.get('js'))(doc, frame.contentWindow);
+        lines.push('ran js');
+      }
+      if (q.get('after')) {
+        setTimeout(() => {
+          const dlg = doc.querySelector('.modal');
+          lines.push('modal=' + (dlg ? 'yes' : 'no'));
+          report(lines.join('\n'));
+        }, 500);
+      } else {
+        report(lines.join('\n'));
+      }
+    } catch (e) {
+      report('PROBE ERROR ' + e.message);
+    }
+  }, delay);
+});
+</script>
+</body>
+</html>

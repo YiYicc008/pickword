@@ -392,7 +392,7 @@ function openAddWord() {
 
 /* ==================== 词团 / 词云管理 ==================== */
 
-function openClusterManager(bookId) {
+export function openClusterManager(bookId) {
   const body = el('div', {});
   const foot = el('div', { style: 'display:flex;gap:9px;width:100%;justify-content:flex-end' });
   const done = el('button', { class: 'btn btn-quiet', text: '关闭' });
@@ -531,7 +531,7 @@ function smallBtn(iconName, title, fn) {
 }
 
 /* 词团编辑器 */
-function openClusterEditor(bookId, cluster, done) {
+export function openClusterEditor(bookId, cluster, done) {
   const clouds = getClouds(bookId);
   const words = getEntriesOfBook(bookId).map((x) => x.word).filter(Boolean);
   const members = new Set(cluster?.memberIds || []);

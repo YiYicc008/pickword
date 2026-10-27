@@ -1,6 +1,6 @@
 /* 应用入口 */
 
-import { load, subscribe, getBooks, getBook, DEMO_MODE } from './store.js';
+import { load, subscribe, getBooks, getBook, getClusters, DEMO_MODE } from './store.js';
 import { vs, selectBook, lastBook } from './viewstate.js';
 import { $ } from './util.js';
 import { toast } from './ui.js';
@@ -13,6 +13,28 @@ import { openAddWordDialog } from './entry.js';
 function boot() {
   load();
 
+  if (DEMO_MODE) {
+    window.addEventListener('error', (e) => {
+      const box = document.createElement('pre');
+      box.style.cssText =
+        'position:fixed;left:8px;bottom:8px;z-index:99999;background:#fff0ee;color:#8c2b1c;' +
+        'padding:8px;font:12px/1.5 monospace;max-width:62%;white-space:pre-wrap;' +
+        'border:1px solid #b8452f;border-radius:8px';
+      box.textContent = 'JS ERROR: ' + e.message + String.fromCharCode(10) + ((e.error && e.error.stack) || '');
+      document.body.appendChild(box);
+    });
+    window.addEventListener('unhandledrejection', (e) => {
+      const box = document.createElement('pre');
+      box.style.cssText =
+        'position:fixed;left:8px;bottom:8px;z-index:99999;background:#fff0ee;color:#8c2b1c;' +
+        'padding:8px;font:12px/1.5 monospace;max-width:62%;white-space:pre-wrap;' +
+        'border:1px solid #b8452f;border-radius:8px';
+      const r = e.reason;
+      box.textContent = 'JS REJECT: ' + ((r && (r.message || r)) || '') + String.fromCharCode(10) + ((r && r.stack) || '');
+      document.body.appendChild(box);
+    });
+  }
+
   const books = getBooks();
   if (!books.length) {
     document.body.innerHTML = '<p style="padding:40px;font-family:sans-serif">数据加载失败，请清空浏览器存储后重试。</p>';
@@ -23,9 +45,12 @@ function boot() {
 
   const params = new URLSearchParams(location.search);
   if (params.get('view') === 'cloud') vs.view = 'cloud';
+  const pendingAction = params.get('action');
 
   wire();
   render();
+
+  if (pendingAction === 'new-book') setTimeout(() => openBookDialog(), 120);
   registerSW();
 
   if (DEMO_MODE) {
@@ -37,6 +62,18 @@ function boot() {
         else if (modal === 'sync') openSyncDialog();
         else if (modal === 'about') openAboutDialog();
         else if (modal === 'manager') import('./cloudview.js').then((m) => m.openClusterManager(vs.bookId));
+        else if (modal === 'clusteredit') {
+          import('./cloudview.js').then((m) => {
+            const c = getClusters(vs.bookId)[0];
+            if (c) m.openClusterEditor(vs.bookId, c, () => {});
+          });
+        } else if (modal === 'word') {
+          Promise.all([import('./store.js'), import('./views.js')]).then(([st, vw]) => {
+            const book = getBook(vs.bookId) || getBooks()[0];
+            const list = st.getEntriesOfBook(book.id).slice().sort((a, b) => b.weight - a.weight);
+            if (list[0]) vw.openWordDetail(list[0].wordId, book.id);
+          });
+        }
       }, 80);
     }
     import('./demo.js')
