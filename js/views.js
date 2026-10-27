@@ -5,13 +5,14 @@ import {
   addTerm, removeEntry, adjustWeight, updateWord, updateBook, deleteBook,
   clearBook, createBook, getLinks, addLink, removeLink, getBooksOfWord,
   getSettings, updateSettings, exportJSON, importJSON, REL_TYPES,
+  getWordByTerm, DEMO_MODE,
 } from './store.js';
 import { vs, selectBook } from './viewstate.js';
 import { icon, toast, openModal, confirmDialog, promptDialog } from './ui.js';
 import { $, el, formatDate, relativeTime, esc } from './util.js';
-import { speak, playAudio } from './dict.js';
+import { speak, playAudio, enrichTerm, missingInfo } from './dict.js';
 import { openAddWordDialog } from './entry.js';
-import { PROVIDERS, hasAI, testConnection } from './ai.js';
+import { PROVIDERS, hasAI, testConnection, translateWord, translateSenses, describeWord } from './ai.js';
 import {
   syncNow, pullRemote, pushOverride, signIn, signUp, signOut,
   authSummary, syncConfig, SYNC_SQL,
@@ -198,6 +199,46 @@ export function renderTopbar() {
 
 /* ==================== 工具栏 ==================== */
 
+/** 批量补齐：对缺少音标/义项的单词重新查询一次 */
+async function fillMissing(bookId, btn) {
+  const targets = getEntriesOfBook(bookId)
+    .map((x) => x.word)
+    .filter((w) => w && missingInfo(w).length);
+  if (!targets.length) { toast('没有需要补全的单词', 'default'); return; }
+  const original = btn.innerHTML;
+  btn.disabled = true;
+  let filled = 0;
+  for (let i = 0; i < targets.length; i++) {
+    const w = targets[i];
+    btn.innerHTML = icon('refresh', 14) + `<span>补全中 ${i + 1}/${targets.length}</span>`;
+    try {
+      const data = await enrichTerm(w.term, { aiClient: aiClientFor(), useDictApi: true, force: true });
+      const patch = {
+        phonetic: data.phonetic || w.phonetic,
+        audio: data.audio || w.audio,
+        pos: data.pos?.length ? data.pos : w.pos,
+        senses: data.senses?.length ? data.senses : w.senses,
+        meaningZh: data.meaningZh || w.meaningZh,
+        enrichState: data.enrichState,
+      };
+      if (patch.senses?.length || patch.phonetic) { updateWord(w.id, patch); filled++; }
+    } catch (e) {
+      console.warn('[fill]', w.term, e);
+    }
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  btn.disabled = false;
+  btn.innerHTML = original;
+  renderAfterDataChange();
+  toast(
+    filled ? `已补全 ${filled} 个单词` : '词典暂时查不到，稍后再试或手动填写释义',
+    filled ? 'success' : 'default',
+    3200
+  );
+}
+
+let syncFillButton = () => {};
+
 export function renderToolbar() {
   const bar = $('#toolbar');
   bar.innerHTML = '';
@@ -233,9 +274,29 @@ export function renderToolbar() {
   bar.appendChild(select);
 
   bar.appendChild(el('div', { class: 'spacer' }));
+
+  const fillHost = el('span', { id: 'fill-host' });
+  bar.appendChild(fillHost);
+  syncFillButton = () => paintFillButton();
+  paintFillButton();
+
   const count = el('span', { class: 'result-count', id: 'result-count' });
   bar.appendChild(count);
   updateCount();
+
+  function paintFillButton() {
+    fillHost.innerHTML = '';
+    if (!fillHost.isConnected) return;
+    const gaps = getEntriesOfBook(vs.bookId)
+      .map((x) => x.word)
+      .filter((w) => w && missingInfo(w).length);
+    if (!gaps.length) return;
+    const fillBtn = el('button', { class: 'btn btn-quiet btn-sm', id: 'btn-fill' });
+    fillBtn.innerHTML = icon('refresh', 14) + `<span>补全释义 ${gaps.length}</span>`;
+    fillBtn.title = '为缺少音标或释义的单词重新查询词典';
+    fillBtn.addEventListener('click', () => fillMissing(vs.bookId, fillBtn));
+    fillHost.appendChild(fillBtn);
+  }
 }
 
 function updateCount() {
@@ -273,6 +334,7 @@ export function renderListOnly() {
   host.innerHTML = '';
   const items = listData();
   updateCount();
+  syncFillButton();
   if (!items.length) {
     host.appendChild(vs.query.trim() ? noResultState() : emptyState());
     return;
@@ -307,20 +369,35 @@ function renderRow({ entry, word }) {
   main.appendChild(speakBtn);
 
   const body = el('div', { class: 'word-body' });
-  const posLine = el('div', { class: 'pos-line' });
-  let shown = 0;
-  for (const p of (word.pos || []).slice(0, 3)) {
-    const ab = posAbbr(p.tag);
-    if (!ab) continue;
-    posLine.appendChild(el('span', { class: `pos-tag ${posClass(ab)}`, text: ab }));
-    shown++;
+  const senses = Array.isArray(word.senses) ? word.senses.filter((s) => s && (s.zh || s.def)) : [];
+  if (senses.length) {
+    // 一个词性一条：词性标签 + 该义项的中文，最多显示两条
+    for (const s of senses.slice(0, 2)) {
+      const line = el('div', { class: 'pos-line sense' });
+      const ab = posAbbr(s.pos);
+      if (ab) line.appendChild(el('span', { class: `pos-tag ${posClass(ab)}`, text: ab }));
+      line.appendChild(el('span', { class: 'meaning-zh', text: s.zh || s.def || '' }));
+      body.appendChild(line);
+    }
+    if (senses.length > 2) {
+      body.appendChild(el('div', { class: 'pos-line more-note', text: `还有 ${senses.length - 2} 个义项` }));
+    }
+  } else {
+    const posLine = el('div', { class: 'pos-line' });
+    let shown = 0;
+    for (const p of (word.pos || []).slice(0, 3)) {
+      const ab = posAbbr(p.tag);
+      if (!ab) continue;
+      posLine.appendChild(el('span', { class: `pos-tag ${posClass(ab)}`, text: ab }));
+      shown++;
+    }
+    if (word.meaningZh) {
+      posLine.appendChild(el('span', { class: 'meaning-zh', text: word.meaningZh }));
+    } else if (shown === 0) {
+      posLine.appendChild(el('span', { class: 'meaning-zh muted', text: '释义待补充' }));
+    }
+    body.appendChild(posLine);
   }
-  if (word.meaningZh) {
-    posLine.appendChild(el('span', { class: 'meaning-zh', text: word.meaningZh }));
-  } else if (shown === 0) {
-    posLine.appendChild(el('span', { class: 'meaning-zh muted', text: '释义待补充' }));
-  }
-  body.appendChild(posLine);
 
   const side = el('div', { class: 'word-side' });
   const pill = el('span', {
@@ -393,6 +470,19 @@ function noResultState() {
 
 /* ==================== 单词详情 ==================== */
 
+function aiClientFor() {
+  return hasAI() ? { translateWord, translateSenses, describeWord } : null;
+}
+
+if (DEMO_MODE) {
+  // 调试入口：?demo 下可从控制台直接打开某个词的详情
+  window.__vnOpenWord = (term) => {
+    const w = getWordByTerm(term);
+    if (w) openWordDetail(w.id, vs.bookId);
+    return w ? w.id : null;
+  };
+}
+
 export function openWordDetail(wordId, bookId) {
   const word = getWord(wordId);
   if (!word) return;
@@ -415,14 +505,32 @@ export function openWordDetail(wordId, bookId) {
   headTop.appendChild(sp);
   head.appendChild(headTop);
 
-  if (word.pos?.length) {
-    const posWrap = el('div', { class: 'preview-pos' });
-    for (const p of word.pos.slice(0, 5)) {
-      posWrap.appendChild(el('span', { class: `pos-tag ${posClass(posAbbr(p.tag))}`, text: posAbbr(p.tag) }));
+  const detailSenses = Array.isArray(word.senses) ? word.senses.filter((s) => s && (s.zh || s.def)) : [];
+  if (detailSenses.length) {
+    const list = el('div', { class: 'sense-list' });
+    detailSenses.forEach((s, i) => {
+      const row = el('div', { class: 'sense-item' });
+      const line = el('div', { class: 'sense-line' });
+      const ab = posAbbr(s.pos);
+      if (ab) line.appendChild(el('span', { class: `pos-tag ${posClass(ab)}`, text: ab }));
+      line.appendChild(el('span', { class: 'sense-zh', text: s.zh || '待补充' }));
+      row.appendChild(line);
+      if (s.def) row.appendChild(el('div', { class: 'sense-def', text: s.def }));
+      if (s.example) row.appendChild(el('div', { class: 'sense-eg', text: `e.g. ${s.example}` }));
+      list.appendChild(row);
+    });
+    head.appendChild(list);
+  } else {
+    if (word.pos?.length) {
+      const posWrap = el('div', { class: 'preview-pos' });
+      for (const p of word.pos.slice(0, 5)) {
+        posWrap.appendChild(el('span', { class: `pos-tag ${posClass(posAbbr(p.tag))}`, text: posAbbr(p.tag) }));
+      }
+      head.appendChild(posWrap);
     }
-    head.appendChild(posWrap);
+    if (word.meaningZh) head.appendChild(el('div', { class: 'preview-meaning', text: word.meaningZh }));
+    else head.appendChild(el('div', { class: 'preview-state', text: '还没有查到释义，可点下方「重新获取」' }));
   }
-  if (word.meaningZh) head.appendChild(el('div', { class: 'preview-meaning', text: word.meaningZh }));
   body.appendChild(head);
 
   // 权重
@@ -514,6 +622,35 @@ export function openWordDetail(wordId, bookId) {
       removeEntry(entry.id); ref.close(); render(); toast('已移除');
     }
   });
+  const refreshBtn = el('button', { class: 'btn btn-quiet', style: 'margin-left:auto' });
+  refreshBtn.innerHTML = icon('refresh', 15) + '<span>重新获取</span>';
+  refreshBtn.title = '重新查一次词典，补齐音标、词性与多个义项';
+  refreshBtn.addEventListener('click', async () => {
+    refreshBtn.disabled = true;
+    refreshBtn.innerHTML = icon('refresh', 15) + '<span>获取中…</span>';
+    try {
+      const data = await enrichTerm(word.term, { aiClient: aiClientFor(), useDictApi: true, force: true });
+      const patch = {
+        phonetic: data.phonetic || word.phonetic,
+        audio: data.audio || word.audio,
+        pos: data.pos?.length ? data.pos : word.pos,
+        senses: data.senses?.length ? data.senses : word.senses,
+        meaningZh: data.meaningZh || word.meaningZh,
+        enrichState: data.enrichState,
+      };
+      updateWord(wordId, patch);
+      ref.close();
+      render();
+      if (patch.senses?.length) toast(`已补全 ${patch.senses.length} 个义项`, 'success');
+      else toast('词典没有查到，稍后再试或手动填写释义', 'default', 3000);
+      openWordDetail(wordId, bookId);
+    } catch (e) {
+      toast(`获取失败：${String(e.message || e).slice(0, 40)}`, 'error', 3000);
+    } finally {
+      refreshBtn.disabled = false;
+      refreshBtn.innerHTML = icon('refresh', 15) + '<span>重新获取</span>';
+    }
+  });
   const save = el('button', { class: 'btn btn-primary', text: '保存修改', style: 'margin-left:auto' });
   save.addEventListener('click', () => {
     updateWord(wordId, { meaningZh: meaningInput.value.trim() });
@@ -521,7 +658,7 @@ export function openWordDetail(wordId, bookId) {
     ref.close();
     render();
   });
-  foot.append(del, save);
+  foot.append(del, refreshBtn, save);
 
   const ref = openModal({
     title: word.term,

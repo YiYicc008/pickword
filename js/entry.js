@@ -4,9 +4,14 @@ import { getBooks, addTerm, updateWord, getWordByTerm, getBooksOfWord, getSettin
 import { icon, toast, openModal } from './ui.js';
 import { el, debounce, looksEnglish } from './util.js';
 import { enrichTerm, speak } from './dict.js';
-import { hasAI, classifyWord, translateWord } from './ai.js';
+import { hasAI, classifyWord, translateWord, translateSenses, describeWord } from './ai.js';
 import { vs } from './viewstate.js';
 import { posAbbr } from './format.js';
+
+const aiClient = () =>
+  hasAI()
+    ? { translateWord, translateSenses, describeWord }
+    : null;
 
 const splitTerms = (raw) =>
   String(raw || '')
@@ -116,14 +121,24 @@ export function openAddWordDialog({ preselectBookId = null, initialTerm = '' } =
     }
     card.appendChild(head);
 
-    if (state?.pos?.length) {
+    if (state?.senses?.length) {
+      const senseWrap = el('div', { class: 'preview-senses' });
+      for (const s of state.senses.slice(0, 3)) {
+        const row = el('div', { class: 'preview-sense' });
+        const ab = posAbbr(s.pos);
+        if (ab) row.appendChild(el('span', { class: 'pos-tag', text: ab }));
+        row.appendChild(el('span', { class: 'preview-sense-zh', text: s.zh || s.def || '' }));
+        senseWrap.appendChild(row);
+      }
+      card.appendChild(senseWrap);
+    } else if (state?.pos?.length) {
       const posWrap = el('div', { class: 'preview-pos' });
       for (const p of state.pos.slice(0, 5)) {
         posWrap.appendChild(el('span', { class: 'pos-tag', text: posAbbr(p.tag) }));
       }
       card.appendChild(posWrap);
     }
-    if (state?.meaningZh) {
+    if (!state?.senses?.length && state?.meaningZh) {
       card.appendChild(el('div', { class: 'preview-meaning', text: state.meaningZh }));
     }
 
@@ -175,11 +190,10 @@ export function openAddWordDialog({ preselectBookId = null, initialTerm = '' } =
     const seq = ++enrichSeq;
     renderPreview('loading');
 
-    const aiClient = hasAI() ? { translateWord } : null;
-    const promise = enrichTerm(term, { aiClient, useDictApi: true })
+    const promise = enrichTerm(term, { aiClient: aiClient(), useDictApi: true })
       .then((data) => {
         if (seq === enrichSeq) {
-          const found = data.phonetic || data.pos?.length || data.meaningZh;
+          const found = data.phonetic || data.pos?.length || data.senses?.length || data.meaningZh;
           renderPreview(found ? data : 'none');
         }
         enrichCache.set(term.toLowerCase(), { data });
@@ -267,15 +281,15 @@ export function openAddWordDialog({ preselectBookId = null, initialTerm = '' } =
           phonetic: data.phonetic || res.word.phonetic,
           audio: data.audio || res.word.audio,
           pos: data.pos?.length ? data.pos : res.word.pos,
+          senses: data.senses?.length ? data.senses : res.word.senses,
           meaningZh: data.meaningZh || res.word.meaningZh,
-          enrichState: 'done',
+          enrichState: data.enrichState || 'done',
         });
       };
       if (cached?.data) apply(cached.data);
       else if (cached?.pending) cached.promise.then(apply).catch(() => {});
       else if (getSettings().autoEnrich && looksEnglish(term)) {
-        const aiClient = hasAI() ? { translateWord } : null;
-        enrichTerm(term, { aiClient, useDictApi: true }).then(apply).catch(() => {});
+        enrichTerm(term, { aiClient: aiClient(), useDictApi: true }).then(apply).catch(() => {});
       }
     }
 

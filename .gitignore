@@ -4,3 +4,7 @@ _backups/
 _probe.html
 *.log
 _snapshot.py
+_probe*.html
+_t_*.html
+_*check.html
+_icon.html

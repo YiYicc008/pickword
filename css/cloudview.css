@@ -178,6 +178,17 @@
 .detail-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; padding-right: 24px; }
 .detail-term { font-family: var(--serif); font-size: 22px; line-height: 1.15; letter-spacing: -.01em; }
 .detail-phonetic { font-family: var(--mono); font-size: 12px; color: var(--ink-3); }
+.detail-senses { display: flex; flex-direction: column; gap: 4px; margin-top: 3px; }
+.detail-sense {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--ink-2);
+  line-height: 1.5;
+}
+.detail-sense .pos-tag { font-size: 9.5px; }
+
 .detail-meaning { font-size: 13px; line-height: 1.6; color: var(--ink-2); }
 .detail-pos, .detail-clusters { display: flex; flex-wrap: wrap; gap: 5px; }
 .mini-cluster {

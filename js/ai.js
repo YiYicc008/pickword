@@ -155,6 +155,105 @@ export async function buildRelations(words) {
     .filter((l) => l.a && l.b && l.a !== l.b);
 }
 
+/** 把每个义项译成中文（一次批量，保持词性对应） */
+export async function translateSenses(term, senses) {
+  const list = senses.slice(0, 4);
+  if (!list.length) return [];
+  const lines = list
+    .map((s, i) => `${i}. [${s.pos || '?'}] ${s.def || ''}`)
+    .join('\n');
+  const raw = await chat(
+    [
+      {
+        role: 'system',
+        content:
+          '你是英汉词典编纂助手。为给定单词的每个英文义项各写一条中文释义。' +
+          '要求：按输入顺序一一对应；每条是词典式短语，不超过 12 个汉字，多个近义说法用「、」连接；' +
+          '不要音标、不要英文、不要词性标注、不要引号、不要序号、不要解释。' +
+          '只输出 JSON：{"zh":["第一条","第二条",...]}',
+      },
+      {
+        role: 'user',
+        content: `单词：${normalizeTerm(term)}\n义项：\n${lines}`,
+      },
+    ],
+    { json: true, temperature: 0.1, maxTokens: 400 }
+  );
+  const parsed = parseJSON(raw);
+  return Array.isArray(parsed?.zh) ? parsed.zh.map((s) => String(s || '').trim()) : [];
+}
+
+/** 词典查不到时，让 AI 补齐音标与义项 */
+export async function describeWord(term) {
+  const raw = await chat(
+    [
+      {
+        role: 'system',
+        content:
+          '你是权威英汉词典。为给定单词给出音标与常用义项。只输出 JSON：' +
+          '{"phonetic":"/国际音标/","senses":[{"pos":"noun|verb|adjective|adverb|...","def":"简短英文释义","zh":"中文释义"}]}。' +
+          '最多 4 个义项，按常用程度排序；不确定的字段留空字符串，不要编造。不要输出解释。',
+      },
+      { role: 'user', content: `单词：${normalizeTerm(term)}` },
+    ],
+    { json: true, temperature: 0.1, maxTokens: 500 }
+  );
+  const parsed = parseJSON(raw);
+  if (!parsed) return null;
+  const senses = Array.isArray(parsed.senses)
+    ? parsed.senses
+        .map((s) => ({ pos: String(s.pos || ''), def: String(s.def || ''), zh: String(s.zh || ''), example: '' }))
+        .filter((s) => s.zh || s.def)
+        .slice(0, 4)
+    : [];
+  return { phonetic: String(parsed.phonetic || ''), senses };
+}
+
+/**
+ * 需求 3：基于本单词本已有词汇，让 AI 划分词团与词云。
+ * 返回 { clouds: [{ name, clusters: [{ name, wordIds: [] }] }] }
+ */
+export async function buildClouds(words) {
+  if (words.length < 2) return [];
+  const list = words
+    .map((w, i) => `${i}. ${w.term}${w.meaningZh ? `（${w.meaningZh}）` : ''}`)
+    .join('\n');
+  const raw = await chat(
+    [
+      {
+        role: 'system',
+        content:
+          '你是英语词汇语义网络整理器。把给定单词组织成「词云—词团」两级结构。' +
+          '词团=彼此关系紧密的一组词（同义/反义/同词根变体/拼写易混/同一主题）；词云=若干相关词团的集合。' +
+          '要求：1~3 个词云；每个词云 2~5 个词团；每个词团 2~6 个单词；' +
+          '同一个单词可以出现在多个词团里（用于体现重叠）；词团名与词云名用简短中文（不超过 8 字）。' +
+          '只输出 JSON：{"clouds":[{"name":"词云名","clusters":[{"name":"词团名","words":[单词,...]}]}]}，' +
+          'words 里必须使用输入列表中的原词，不要输出解释。',
+      },
+      { role: 'user', content: `单词列表：\n${list}` },
+    ],
+    { json: true, temperature: 0.3, maxTokens: 2000, timeout: 90000 }
+  );
+  const parsed = parseJSON(raw);
+  const clouds = Array.isArray(parsed?.clouds) ? parsed.clouds : [];
+  const byTerm = new Map(words.map((w) => [String(w.term).toLowerCase(), w.id]));
+  return clouds
+    .map((c) => {
+      const clusters = (Array.isArray(c.clusters) ? c.clusters : [])
+        .map((k) => {
+          const ids = [];
+          for (const t of Array.isArray(k.words) ? k.words : []) {
+            const id = byTerm.get(String(t).toLowerCase());
+            if (id && !ids.includes(id)) ids.push(id);
+          }
+          return { name: String(k.name || '').trim() || '未命名词团', wordIds: ids };
+        })
+        .filter((k) => k.wordIds.length >= 1);
+      return { name: String(c.name || '').trim() || '词云', clusters };
+    })
+    .filter((c) => c.clusters.length);
+}
+
 /** 测试连接 */
 export async function testConnection() {
   const raw = await chat(

@@ -10,7 +10,7 @@ import { icon, toast, openModal, confirmDialog, promptDialog } from './ui.js';
 import { el, looksEnglish } from './util.js';
 import { WordCloud } from './graph.js';
 import { deriveClusters } from './cluster.js';
-import { hasAI, buildRelations } from './ai.js';
+import { hasAI, buildRelations, buildClouds } from './ai.js';
 import { vs } from './viewstate.js';
 import { openWordDetail } from './views.js';
 import { posAbbr, posClass, weightClass } from './format.js';
@@ -65,16 +65,26 @@ export function renderCloudView(host) {
 
   const tools = el('div', { class: 'cloud-tools' });
   const btnOrganize = ghostBtn('整理词团', 'layers', () => autoOrganize(book.id));
+  const btnAIOrganize = ghostBtn('AI 生成词云', 'cloud', () => aiOrganize(book.id));
+  if (DEMO_MODE) {
+    window.__vnAIOrganize = () => aiOrganize(book.id);
+    window.__vnAIInfo = () => ({
+      entries: entries.length,
+      words: entries.map((x) => x.word).filter((w) => w && looksEnglish(w.term)).length,
+      hasAI: hasAI(),
+      sample: entries.slice(0, 3).map((e) => e.wordId),
+    });
+  }
   const btnAI = ghostBtn('AI 生成关联', 'sparkles', () => aiRelations(book.id));
   const btnManage = ghostBtn('词团 / 词云', 'settings', () => openClusterManager(book.id));
-  if (!hasAI()) btnAI.classList.add('dim');
+  if (!hasAI()) { btnAI.classList.add('dim'); btnAIOrganize.classList.add('dim'); }
   const btnFit = ghostBtn(null, 'maximize', () => current?.fit());
   btnFit.title = '适应窗口';
   const btnIn = ghostBtn(null, 'zoomIn', () => current?.zoomTo(1.25));
   btnIn.title = '放大';
   const btnOut = ghostBtn(null, 'x', () => current?.zoomTo(0.8));
   btnOut.title = '缩小';
-  tools.append(btnOrganize, btnAI, btnManage, el('span', { class: 'cloud-sep' }), btnOut, btnIn, btnFit);
+  tools.append(btnOrganize, btnAIOrganize, btnAI, btnManage, el('span', { class: 'cloud-sep' }), btnOut, btnIn, btnFit);
   bar.appendChild(tools);
   root.appendChild(bar);
 
@@ -234,8 +244,21 @@ export function renderCloudView(host) {
     head.appendChild(wp);
     detail.appendChild(head);
 
-    if (word.meaningZh) detail.appendChild(el('div', { class: 'detail-meaning', text: word.meaningZh }));
-    if (word.pos?.length) {
+    const senses = Array.isArray(word.senses) ? word.senses.filter((x) => x && (x.zh || x.def)) : [];
+    if (senses.length) {
+      const list = el('div', { class: 'detail-senses' });
+      for (const s of senses.slice(0, 3)) {
+        const line = el('div', { class: 'detail-sense' });
+        const ab = posAbbr(s.pos);
+        if (ab) line.appendChild(el('span', { class: `pos-tag ${posClass(ab)}`, text: ab }));
+        line.appendChild(el('span', { text: s.zh || s.def || '' }));
+        list.appendChild(line);
+      }
+      detail.appendChild(list);
+    } else if (word.meaningZh) {
+      detail.appendChild(el('div', { class: 'detail-meaning', text: word.meaningZh }));
+    }
+    if (!senses.length && word.pos?.length) {
       const line = el('div', { class: 'detail-pos' });
       for (const p of word.pos.slice(0, 4)) {
         const ab = posAbbr(p.tag);
@@ -313,12 +336,58 @@ export function renderCloudView(host) {
   }
 
   /* ---------- AI 生成关联 ---------- */
+  /** AI 通读本单词本的词汇，自行归纳词团并组织成词云 */
+  async function aiOrganize(bookId) {
+    if (!hasAI()) {
+      toast('请先在「设置 → AI 服务」中填入 API Key', 'error', 3200);
+      return;
+    }
+    const words = entries.map((x) => x.word).filter((w) => w && looksEnglish(w.term));
+    if (words.length < 3) { toast('至少需要三个英文单词', 'error'); return; }
+    if (words.length > 120) { toast('单词过多（>120），请先精简或分本处理', 'error', 3200); return; }
+
+    const ok = await confirmDialog({
+      title: 'AI 生成词团与词云',
+      message: `将让 AI 通读「${book.name}」中的 ${words.length} 个单词，自行归纳出若干词团（同义、反义、形近、词族、主题等），并把它们组织成词云。已有的 AI 生成词团会被替换，手动词团保留。`,
+      confirmText: '开始生成',
+    });
+    if (!ok) return;
+
+    toast('AI 正在归纳词团与词云，可能需要十几秒…', 'default', 3600);
+    try {
+      const plan = await buildClouds(words);
+      if (!plan.length) { toast('AI 没有给出可用的分组', 'default', 3000); return; }
+
+      for (const c of getClusters(bookId).filter((x) => x.auto)) deleteCluster(c.id);
+
+      let firstCloud = null;
+      let clusterCount = 0;
+      for (const cw of plan) {
+        const cloud = createCloud(bookId, cw.name, []);
+        const ids = [];
+        for (const cl of cw.clusters) {
+          const made = createCluster(bookId, cl.name, cl.wordIds, 'semantic');
+          updateCluster(made.id, { cloudId: cloud.id, auto: true });
+          ids.push(made.id);
+          clusterCount++;
+        }
+        updateCloud(cloud.id, { clusterIds: ids });
+        firstCloud = firstCloud || cloud.id;
+      }
+      vs.cloudId = firstCloud;
+      rebuild();
+      toast(`已生成 ${plan.length} 个词云、${clusterCount} 个词团`, 'success', 3200);
+    } catch (e) {
+      toast(`AI 生成失败：${String(e.message || e).slice(0, 60)}`, 'error', 4200);
+    }
+  }
+
   async function aiRelations(bookId) {
     if (!hasAI()) {
       toast('请先在「设置 → AI 服务」中填入 API Key', 'error', 3200);
       return;
     }
-    const words = entries.map((e) => getWord(e.wordId)).filter((w) => w && looksEnglish(w.term));
+    const words = entries.map((x) => x.word).filter((w) => w && looksEnglish(w.term));
     if (words.length < 2) { toast('至少需要两个英文单词', 'error'); return; }
     if (words.length > 120) { toast('单词过多（>120），请先精简或分本处理', 'error', 3200); return; }
 
