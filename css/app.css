@@ -530,7 +530,7 @@ a { color: var(--accent); }
 
 /* 多义项（列表最多两条，详情完整） */
 /* 详情：可编辑、可拖动的释义卡片 */
-.se-list { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.se-list { position: relative; display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
 .se-card {
   display: flex;
   gap: 8px;
@@ -541,16 +541,27 @@ a { color: var(--accent); }
   background: var(--surface);
   transition: box-shadow .16s var(--ease), border-color .16s var(--ease), opacity .16s;
 }
-.se-card { cursor: grab; }
+.se-card { cursor: grab; touch-action: pan-y; }
 .se-card input { cursor: text; }
+/* 拖动中的卡片：脱开文档流浮起来，跟着指针走 */
 .se-card.dragging {
-  position: relative;
-  z-index: 2;
-  border-color: var(--accent);
+  position: absolute;
+  z-index: 60;
+  margin: 0;
+  pointer-events: none;
+  border: 1.5px solid var(--accent);
   background: #fff;
-  box-shadow: var(--sh-2);
+  box-shadow: 0 22px 44px -16px rgba(32, 29, 25, .5), 0 6px 14px rgba(32, 29, 25, .16);
   cursor: grabbing;
   user-select: none;
+  will-change: transform;
+}
+/* 卡片原来的位置：留一个虚框占位，松手后卡片回到这里 */
+.se-ghost {
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  opacity: .55;
 }
 .se-handle {
   flex: none;
@@ -601,6 +612,9 @@ a { color: var(--accent); }
 }
 .se-tag.hide { display: none; }
 .se-card.cold { opacity: .7; }
+/* 拖动时卡片必须是完全不透明的，否则会看见下面那张卡片的字 */
+.se-card.cold.dragging,
+.se-card.dragging { opacity: 1; }
 .se-card.cold .se-tag { background: var(--surface-2); color: var(--ink-3); }
 .se-del {
   flex: none;

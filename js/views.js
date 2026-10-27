@@ -801,39 +801,65 @@ export function openWordDetail(wordId, bookId) {
   })));
   const seedSig = sig(seed);
 
-  // 整张卡片都能拖（输入框、按钮除外）；监听挂在 window 上，鼠标移出卡片也跟得住
+  // 整张卡片都能拖（输入框、按钮除外）：拖动时卡片「浮」起来跟着指针走，原位留一个占位
   function attachDrag(card) {
     card.addEventListener('pointerdown', (e) => {
       if (e.button && e.button !== 0) return;
       if (e.target.closest('input, button, select, textarea')) return;
       e.preventDefault();
+      const rect = card.getBoundingClientRect();
+      const startX = e.clientX;
       const startY = e.clientY;
-      let moving = false;
-      card.classList.add('dragging');
       const addBtn = senseList.querySelector('.se-add');
+      let ghost = null;
+      let moving = false;
+
       const onMove = (ev) => {
-        if (!moving && Math.abs(ev.clientY - startY) < 3) return;
-        moving = true;
+        const dy = ev.clientY - startY;
+        if (!moving) {
+          if (Math.abs(dy) < 4) return;
+          moving = true;
+          ghost = el('div', { class: 'se-ghost' });
+          ghost.style.height = `${rect.height}px`;
+          senseList.insertBefore(ghost, card);
+          // 先占位再脱离文档流，其它卡片不会跳；坐标相对 .se-list
+          const listRect = senseList.getBoundingClientRect();
+          card.classList.add('dragging');
+          card.style.position = 'absolute';
+          card.style.width = `${rect.width}px`;
+          card.style.height = `${rect.height}px`;
+          card.style.left = `${rect.left - listRect.left}px`;
+          card.style.top = `${rect.top - listRect.top}px`;
+        }
+        card.style.transform = `translate(${ev.clientX - startX}px, ${dy}px) scale(1.015)`;
+        // 跟着指针的中心去和别的卡片比位置，实时挪动占位块
+        const centerY = rect.top + dy + rect.height / 2;
         const others = Array.from(senseList.querySelectorAll('.se-card:not(.se-add)')).filter((c) => c !== card);
         let placed = false;
         for (const c of others) {
           const r = c.getBoundingClientRect();
-          if (ev.clientY < r.top + r.height / 2) {
-            if (card.nextElementSibling !== c) senseList.insertBefore(card, c);
+          if (centerY < r.top + r.height / 2) {
+            if (ghost.nextElementSibling !== c) senseList.insertBefore(ghost, c);
             placed = true;
             break;
           }
         }
-        if (!placed && addBtn && card.nextElementSibling !== addBtn) senseList.insertBefore(card, addBtn);
-        paintTags();
+        if (!placed && addBtn && ghost.nextElementSibling !== addBtn) senseList.insertBefore(ghost, addBtn);
       };
+
       const onUp = () => {
-        card.classList.remove('dragging');
         window.removeEventListener('pointermove', onMove);
         window.removeEventListener('pointerup', onUp);
         window.removeEventListener('pointercancel', onUp);
+        card.classList.remove('dragging');
+        card.style.cssText = '';
+        if (ghost && ghost.parentNode) {
+          ghost.parentNode.insertBefore(card, ghost);
+          ghost.remove();
+        }
         paintTags();
       };
+
       window.addEventListener('pointermove', onMove);
       window.addEventListener('pointerup', onUp);
       window.addEventListener('pointercancel', onUp);
@@ -895,7 +921,9 @@ export function openWordDetail(wordId, bookId) {
   senseList.appendChild(
     el('p', {
       class: 'se-hint',
-      text: '按住卡片上下拖可以调整顺序（输入框除外）；列表里只显示前两条。',
+      text: window.matchMedia('(pointer: coarse)').matches
+        ? '按住左侧手柄上下拖可以调整顺序；列表里只显示前两条。'
+        : '按住卡片上下拖可以调整顺序（输入框除外）；列表里只显示前两条。',
     }),
   );
   senseList.addEventListener('input', () => paintTags());
