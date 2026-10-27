@@ -32,7 +32,7 @@
 | 同步 | 可选 Supabase：邮箱登录，三端共享同一份数据 |
 
 > **在线试用**：<https://YiYicc008.github.io/pickword/index.html?demo>（`?demo` 会载入示例数据）
-> 自己怎么用起来有三种方式（现成网址 / 本机小服务器 / 部署成自己的网站），见 [第一节](#一先选一种用法)。
+> 自己怎么用起来有三种方式（现成网址 / 本机小服务器 / 部署成自己的网站），见「一、先选一种用法」。
 
 界面语言：简体中文　｜　代码：原生 JavaScript（ES Modules），零依赖、无构建步骤
 
@@ -46,15 +46,15 @@
 | --- | --- | --- |
 | **① 直接用现成的网址** | 只想用，不想装任何东西 | 打开 `https://YiYicc008.github.io/pickword/`（示例数据：`…/index.html?demo`） |
 | **② 在自己电脑上跑** | 想完全离线、数据只留在本机 | 双击 `start.bat`，手机连同一个 WiFi 访问 |
-| **③ 部署成自己的网站** | 想拥有自己的地址、三端随时访问 | 见 [第八节：部署成自己的网站](#八部署成自己的网站github-pages) |
+| **③ 部署成自己的网站** | 想拥有自己的地址、三端随时访问 | 见下面第 3 小节 |
 
-本节讲 ①（直接访问）和 ②（本机小服务器）；③ 是把这个文件夹发布到 GitHub Pages，见第八节。
+下面三小节依次讲：**① 直接访问**、**② 在本机跑一个小服务器**、**③ 部署成自己的网站**。
 
 ### 1. 用法 ①：直接用现成的网址（最快，什么都不用装）
 
 1. 电脑 / iPad / 手机浏览器打开 `https://YiYicc008.github.io/pickword/`
 2. 想先看效果就加 `?demo`：`https://YiYicc008.github.io/pickword/index.html?demo`
-3. 收进主屏幕（见下面第 3 小节）之后，断网也能用
+3. 收进主屏幕（见下面第 4 小节）之后，断网也能用
 
 > 三端要**共享同一份单词本**，还需要配一次云同步（第四节）。
 > 不配的话每台设备各自存各的，但都能正常用。
@@ -88,12 +88,52 @@
 > 需要电脑装有 Python 3。没有的话到 <https://www.python.org/downloads/> 安装，
 > 安装时勾选 *Add python.exe to PATH*。也可以把整个文件夹丢到任意静态服务器上。
 
-### 3. 收进主屏幕（两种用法都适用）
+### 3. 用法 ③：部署成自己的网站（GitHub Pages）
+
+把整个文件夹发布到 GitHub Pages，得到自己的公网地址（本项目在用的就是
+`https://YiYicc008.github.io/pickword/`）。部署之后**三端不再需要同一个 WiFi**：任何网络都能打开，
+装到主屏幕后离线也能用（数据要三端共享，还要接着配第四节云同步）。
+
+1. 在 GitHub 新建一个仓库，把整个文件夹推上去：
+
+   ```bash
+   git init
+   git add .
+   git commit -m "init: 拾词 · 电子英语单词本"
+   git branch -M main
+   git remote add origin https://github.com/YiYicc008/pickword.git
+   git push -u origin main
+   ```
+
+2. 仓库 **Settings → Pages**：Source 选 `Deploy from a branch`，Branch 选 `main`、目录 `/(root)`，Save。
+
+3. 等一两分钟，访问 `https://YiYicc008.github.io/pickword/`。
+   想直接看示例数据就加 `?demo`：`…/index.html?demo`。
+
+4. 收进主屏幕见下面第 4 小节。
+
+**谁打开这个网址？看到的是谁的数据？**
+
+- 公开仓库的 Pages 是公开的：拿到链接的人都能打开页面，不需要登录。
+- 但每个人打开的是**他自己的**空单词本 —— 数据存在各自浏览器的 `localStorage` 里，互相看不到。
+  `?demo` 只是往**他自己**的浏览器里灌一份示例数据，不影响作者的数据。
+- 谁想同步，注册的是**他自己的** Supabase 账号（第四节），按 RLS 只能读写自己那一行。
+- 私有仓库要用 Pages 需要 GitHub Pro；公开仓库免费。
+
+几点说明：
+
+- 所有资源都用相对路径，放在子目录（`https://…/pickword/`）也能正常工作；
+- 根目录的 `.nojekyll` 用来跳过 Jekyll 处理，避免带下划线/特殊名字的文件被忽略；
+- 换成 Netlify / Vercel / Cloudflare Pages 也一样，都是纯静态托管，直接把文件夹拖进去即可；
+- 只想局域网用，就不必做这一步，按「用法 ②」双击 `start.bat` 就行。
+
+### 4. 收进主屏幕（三种用法都适用）
 
 手机 / 平板打开地址后：
 
 - **用法 ①**：直接用 `https://YiYicc008.github.io/pickword/`，任何网络都行；
-- **用法 ②**：让设备连上**和电脑同一个 WiFi**，打开 start.bat 窗口里列出的局域网地址（如 `http://192.168.1.7:8080/index.html`）。
+- **用法 ②**：让设备连上**和电脑同一个 WiFi**，打开 start.bat 窗口里列出的局域网地址（如 `http://192.168.1.7:8080/index.html`）；
+- **用法 ③**：部署完就是用法 ① 那个地址，同样打开即可。
 
 然后收进主屏幕，之后就像 App 一样点开：
 
@@ -103,7 +143,7 @@
 
 三端界面会自动适配：桌面是左右分栏，手机是抽屉式侧栏 + 单列卡片，词云会切换成紧凑模式。
 
-### 4. 想先看看效果
+### 5. 想先看看效果
 
 在地址后面加 `?demo`，例如 `https://YiYicc008.github.io/pickword/index.html?demo`（本机则是 `http://127.0.0.1:8080/index.html?demo`），
 会载入两个示例单词本（雅思高频词 30 个 / 形近词辨析 8 个）、9 个词团、3 个词云。
@@ -400,47 +440,7 @@ git revert <commit>        # 撤销某次提交
 
 ---
 
-## 八、部署成自己的网站（GitHub Pages）
-
-这就是上面「**用法 ③**」：把整个文件夹发布到 GitHub Pages，得到一个公网地址（本项目在用的就是
-`https://YiYicc008.github.io/pickword/`）。部署之后**三端不再需要同一个 WiFi**：任何网络都能打开，
-装到主屏幕后离线也能用。
-（数据要三端共享，还需要接着配第四节的云同步。）
-
-1. 在 GitHub 新建一个仓库，把整个文件夹推上去：
-
-   ```bash
-   git init
-   git add .
-   git commit -m "init: 拾词 · 电子英语单词本"
-   git branch -M main
-   git remote add origin https://github.com/YiYicc008/pickword.git
-   git push -u origin main
-   ```
-
-2. 仓库 **Settings → Pages**：Source 选 `Deploy from a branch`，Branch 选 `main`、目录 `/(root)`，Save。
-
-3. 等一两分钟，访问 `https://YiYicc008.github.io/pickword/`。
-   想直接看示例数据就加 `?demo`：`…/index.html?demo`。
-
-4. iPad / 手机打开同一个地址 → 分享 → **添加到主屏幕**；Windows 上 Chrome / Edge 地址栏右侧的安装图标也能装。
-
-**谁打开这个网址？看到的是谁的数据？**
-
-- 公开仓库的 Pages 是公开的：拿到链接的人都能打开页面，不需要登录。
-- 但每个人打开的是**他自己的**空单词本 —— 数据存在各自浏览器的 `localStorage` 里，互相看不到。
-  `?demo` 只是往**他自己**的浏览器里灌一份示例数据，不影响作者的数据。
-- 谁想同步，注册的是**他自己的** Supabase 账号（第四节），按 RLS 只能读写自己那一行。
-- 私有仓库要用 Pages 需要 GitHub Pro；公开仓库免费。
-
-几点说明：
-
-- 所有资源都用相对路径，放在子目录（`https://…/pickword/`）也能正常工作；
-- 根目录的 `.nojekyll` 用来跳过 Jekyll 处理，避免带下划线/特殊名字的文件被忽略；
-- 换成 Netlify / Vercel / Cloudflare Pages 也一样，都是纯静态托管，直接把文件夹拖进去即可；
-- 只想局域网用，就不必部署，双击 `start.bat` 后按窗口里打印的地址访问。
-
-## 九、数据与隐私
+## 八、数据与隐私
 
 - 默认**纯本地**：单词本、词条、权重、词团都存在本机浏览器的 `localStorage`（键 `vn.state.v2`），不上传任何服务器；
 - AI Key、Supabase 配置同样只存本机，不会写进代码或仓库（仓库里只有占位提示文字）；
@@ -448,7 +448,7 @@ git revert <commit>        # 撤销某次提交
   建表 SQL 见 [`supabase/schema.sql`](supabase/schema.sql)，每行数据都有行级安全策略，只有本人可读写；
 - 换设备 / 清浏览器缓存前：先「导出 JSON」备份，或先配好云同步并同步一次。
 
-## 十、参与贡献
+## 九、参与贡献
 
 Issue / PR 都欢迎。动手前请留意三条约定：
 
@@ -469,3 +469,4 @@ Issue / PR 都欢迎。动手前请留意三条约定：
 ## 许可证
 
 [MIT](LICENSE)
+
