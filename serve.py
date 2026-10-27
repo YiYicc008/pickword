@@ -68,6 +68,11 @@ class Handler(SimpleHTTPRequestHandler):
 
 
 def main():
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
     preferred = 8080
     if len(sys.argv) > 1:
         try:
@@ -77,17 +82,17 @@ def main():
 
     port = pick_port(preferred)
     if not port:
-        print("找不到可用端口，请关掉占用端口的程序后重试。")
+        print("找不到可用端口，请关掉占用端口的程序后重试。", flush=True)
         return 1
 
     local = f"http://127.0.0.1:{port}/index.html"
     ips = lan_ips()
 
-    print("=" * 62)
-    print("  词汇 · 电子英语单词本")
-    print("=" * 62)
+    print("=" * 62, flush=True)
+    print("  词汇 · 电子英语单词本", flush=True)
+    print("=" * 62, flush=True)
     print("")
-    print(f"  本机访问（这台电脑）：{local}")
+    print(f"  本机访问（这台电脑）：{local}", flush=True)
     if ips:
         print("  同一 WiFi 下的手机 / 平板访问：")
         for ip in ips:
@@ -99,8 +104,8 @@ def main():
     print("  · 鸿蒙 / 安卓：浏览器打开 → 菜单 → 添加到桌面")
     print("  · 示例数据：在上面地址后面加 ?demo")
     print("")
-    print("  按 Ctrl+C 停止服务。")
-    print("=" * 62)
+    print("  按 Ctrl+C 停止服务。", flush=True)
+    print("=" * 62, flush=True)
 
     threading.Timer(0.8, lambda: webbrowser.open(local)).start()
 
