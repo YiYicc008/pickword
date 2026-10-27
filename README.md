@@ -1,9 +1,38 @@
 # 词汇 · 电子英语单词本
 
-一个可以在 **Windows 电脑 / 鸿蒙手机 / iPad** 上使用的电子英语单词本。纯前端 PWA，
-无需安装、无需构建：双击就能跑，也可以放到任意静态网站空间上，用浏览器"添加到主屏幕"后像 App 一样使用。
+**一个可以在 Windows 电脑 / iPad / 鸿蒙手机上使用的电子英语单词本。**
+纯前端 PWA，零依赖、零构建：双击就能跑，也可以放到任意静态网站空间，用浏览器「添加到主屏幕」后像 App 一样使用。
 
-界面语言：简体中文　｜　代码：原生 JavaScript（ES Modules），零依赖
+录入单词会自动补上音标、发音、词性和中文释义；每个单词带一个看得见的**权重**；
+一个单词本既能按权重/时间排序，也能摊成一张可交互的**词云**（节点=单词，词团=变体/同义/反义/形近，多个词团组成词云）。
+
+<p align="center">
+  <img src="docs/words.png" width="74%" alt="单词列表：权重、音标、词性、中文释义">
+  <br>
+  <img src="docs/cloud.png" width="74%" alt="词云：节点=单词，词团按关系聚拢、可重叠且能分辨">
+  <br>
+  <img src="docs/detail.png" width="52%" alt="单词详情：拖动排序释义、改词性/中文、权重调整">
+  <img src="docs/mobile.png" width="24%" alt="手机端：自适应布局">
+</p>
+
+## 功能一览
+
+| 能力 | 说明 |
+| --- | --- |
+| 多单词本 | 自己命名、挑颜色，各自独立计数 |
+| 录入单词 | 手动勾选放进哪几个本；也可以点「AI 智能分类」让它判断 |
+| 自动补全 | 音标、发音、词性、多义项中文；可配 AI 提升中文质量 |
+| 权重 | 首次加入 = 1，同一单词再进同一本 +1，直接显示在单词旁 |
+| 排序 | 权重升/降序、加入时间升/降序 |
+| 词云 | 自研力导向图，词团可部分重叠但视觉可辨；AI 可一键生成词团与词云 |
+| 编辑 | 详情里拖动排序释义卡片、改词性/中文、加自定义释义 |
+| 三端 | 同一个网页适配桌面 / 平板 / 手机，可「添加到主屏幕」离线使用 |
+| 同步 | 可选 Supabase：邮箱登录，三端共享同一份数据 |
+
+> **在线试用**：部署到 GitHub Pages 后访问 `https://<你的用户名>.github.io/<仓库名>/index.html?demo`（带 `?demo` 会载入示例数据）。
+> 没部署也能用：见下面「五分钟上手」。
+
+界面语言：简体中文　｜　代码：原生 JavaScript（ES Modules），零依赖、无构建步骤
 
 ---
 
@@ -209,6 +238,11 @@ English Dictionary/
 ├── sw.js                   离线缓存（应用外壳缓存优先）
 ├── start.bat               Windows 一键启动
 ├── serve.py                局域网静态服务器 + 地址提示
+├── LICENSE                 MIT 许可
+├── .nojekyll               关闭 GitHub Pages 的 Jekyll 处理
+├── supabase/
+│   └── schema.sql          云同步建表 SQL（Supabase SQL Editor 里执行一次）
+├── docs/                   README 用的截图
 ├── css/
 │   ├── app.css             设计系统与主要布局（含三端响应式）
 │   └── cloudview.css       词云视图样式
@@ -235,9 +269,10 @@ English Dictionary/
 
 ---
 
-## 六、备份与回滚（开发者）
+## 六、备份与回滚
 
-这个目录是一个 git 仓库，每次改动都有提交，可以随时回滚：
+数据层面有两条退路：`设置 → 数据 → 导出备份`（生成 JSON），以及第四节的云同步。
+代码层面就是普通的 git 仓库：
 
 ```bash
 git log --oneline          # 看历史
@@ -246,12 +281,8 @@ git checkout -- .          # 丢弃未提交的改动
 git revert <commit>        # 撤销某次提交
 ```
 
-另外可以用快照脚本打包整个工作副本（跳过 `.git`、`_backups`）：
-
-```bash
-python _snapshot.py 改了点什么
-# → _backups/20261027-134454-改了点什么.zip
-```
+> 开发期间我还用一个本地脚本 `_snapshot.py` 把工作副本打包成 zip（跳过 `.git`、`_backups`），
+> 它和 `_backups/` 都在 `.gitignore` 里，仓库里不包含。
 
 ---
 
@@ -275,3 +306,65 @@ python _snapshot.py 改了点什么
 
 **想清空重来？**
 `设置 → 数据 → 清空` 会删除所有单词本与词条；只想清一个本，右键该单词本选择"清空"。
+
+---
+
+## 八、部署到 GitHub Pages
+
+部署之后**三端不再需要同一个 WiFi**：任何网络都能打开，装到主屏幕后离线也能用。
+（数据要三端共享，还需要接着配第四节的云同步。）
+
+1. 在 GitHub 新建一个仓库，把整个文件夹推上去：
+
+   ```bash
+   git init
+   git add .
+   git commit -m "init: 词汇 · 电子英语单词本"
+   git branch -M main
+   git remote add origin https://github.com/<你的用户名>/<仓库名>.git
+   git push -u origin main
+   ```
+
+2. 仓库 **Settings → Pages**：Source 选 `Deploy from a branch`，Branch 选 `main`、目录 `/(root)`，Save。
+
+3. 等一两分钟，访问 `https://<你的用户名>.github.io/<仓库名>/`。
+   想直接看示例数据就加 `?demo`：`…/index.html?demo`。
+
+4. iPad / 手机打开同一个地址 → 分享 → **添加到主屏幕**；Windows 上 Chrome / Edge 地址栏右侧的安装图标也能装。
+
+几点说明：
+
+- 所有资源都用相对路径，放在子目录（`https://…/vocabulary/`）也能正常工作；
+- 根目录的 `.nojekyll` 用来跳过 Jekyll 处理，避免带下划线/特殊名字的文件被忽略；
+- 换成 Netlify / Vercel / Cloudflare Pages 也一样，都是纯静态托管，直接把文件夹拖进去即可；
+- 只想局域网用，就不必部署，双击 `start.bat` 后按窗口里打印的地址访问。
+
+## 九、数据与隐私
+
+- 默认**纯本地**：单词本、词条、权重、词团都存在本机浏览器的 `localStorage`（键 `vn.state.v2`），不上传任何服务器；
+- AI Key、Supabase 配置同样只存本机，不会写进代码或仓库（仓库里只有占位提示文字）；
+- 只有你自己在设置里填了 Supabase 并登录，数据才会同步到**你自己的** Supabase 项目；
+  建表 SQL 见 [`supabase/schema.sql`](supabase/schema.sql)，每行数据都有行级安全策略，只有本人可读写；
+- 换设备 / 清浏览器缓存前：先「导出 JSON」备份，或先配好云同步并同步一次。
+
+## 十、参与贡献
+
+Issue / PR 都欢迎。动手前请留意三条约定：
+
+- **零依赖、无构建**：不引入 npm 包或编译步骤，保持在浏览器里直接跑的原生 ES Modules；
+- **数据向后兼容**：`store.js` 的 state 带 `version` 字段，新增字段要保证老数据能读（缺字段用默认值兜底）；
+- **自查**：`python serve.py` 后用 `index.html?demo` 过一遍列表 / 词云 / 详情 / 设置，桌面和 390 宽各看一次。
+
+调试用的 URL 参数（只在 `?demo` 下开放）：
+
+| 参数 | 作用 |
+| --- | --- |
+| `?demo` | 载入示例数据（两个单词本 38 个词、9 个词团、3 个词云） |
+| `?demo&view=cloud` | 直接打开词云视图 |
+| `?demo&modal=add` | 直接打开「添加单词」 |
+| `?demo&modal=settings` / `sync` / `about` | 直接打开设置 / 云同步 / 关于 |
+| `?demo&modal=manager` | 直接打开「词团与词云」管理器 |
+
+## 许可证
+
+[MIT](LICENSE)
