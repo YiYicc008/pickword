@@ -60,6 +60,16 @@ const POS_ORDER = [
 ];
 // Wiktionary 里有大量「用法说明」并不是释义本身
 const USAGE_NOTE = /^(preceded by|followed by|usually|often|chiefly|mainly|used |sometimes|esp\.? |especially |as |in the phrase|short for|alternative form of|alternative spelling of|plural of|past participle of|past tense of|present participle of|third-person singular|nonstandard spelling|misspelling|obsolete|archaic|initialism|abbreviation|see )/i;
+// 「(heading) Emotionally negative.」这类只是分组标题，「(archaic) ...」是废弃义
+const HEADER_OR_RARE = /^[(](heading|idiom|proverb|phrase|obsolete|archaic|rare|dialectal|nonstandard|slang|vulgar|dated|poetic|literary)[)]/i;
+// 生僻义：字母名、人名、地名、罗马字转写等，对背单词没用还会挤掉常用义
+const RARE_SENSE = [
+  /(^| )the (letter|character)( |,)[^.]* (arabic|hebrew|cyrillic|greek|latin|armenian|georgian|devanagari|thai|script|alphabet)( |[.])/i,
+  /(^| )(romanization|transliteration|transcription) of( |[.])/i,
+  /(^| )(surname|given name|male given name|female given name|nickname|patronymic)( |[.])/i,
+  /^(a |an )?(village|town|city|river|mountain|province|district|island|county|state|lake) (in|of|on)( |[.])/i,
+  /^(a )?(genus|species|taxonomic)( |[.])/i,
+];
 
 // 有些字体缺 IPA 的 ɹ / ɡ 等字形，显示成怪字符；换成常见写法更稳
 const PHONETIC_MAP = { 'ɹ': 'r', 'ɡ': 'g', 'ɴ': 'n', 'ʙ': 'b', 'ʀ': 'r', 'ɫ': 'l' };
@@ -70,11 +80,17 @@ function normalizePhonetic(text) {
   return t.replace(/[ɹɡɴʙʀɫ]/g, (c) => PHONETIC_MAP[c] || c);
 }
 
-/** 过滤掉「To run.」这类自我指向和纯用法说明，否则会顶掉真正的释义 */
+/** 过滤掉「To run.」这类自我指向、分组标题和生僻义，否则会顶掉真正的释义 */
 function isUsefulDefinition(def, term) {
   const d = String(def || '').replace(/\s+/g, ' ').trim();
   if (d.length < 4) return false;
   if (USAGE_NOTE.test(d)) return false;
+  if (HEADER_OR_RARE.test(d)) return false;
+  const t0 = String(term || '').trim().toLowerCase();
+  // 查的就是 letter / name 这类词本身时，不能把这些释义滤掉
+  if (!['letter', 'character', 'name', 'surname', 'city', 'town', 'village', 'river', 'genus', 'species'].includes(t0)) {
+    if (RARE_SENSE.some((re) => re.test(d))) return false;
+  }
   const t = String(term || '').trim().toLowerCase();
   const bare = d.replace(/^to\s+/i, '').replace(/[.。]$/, '').trim().toLowerCase();
   if (!t) return true;
@@ -183,13 +199,37 @@ export async function translateToChinese(term, context = '', aiClient = null) {
   return myMemoryTranslate(term);
 }
 
+let rateLimitedAt = 0;
+
+/** 测试用：给 MyMemory 请求留一个可替换的入口（生产环境始终走真实 fetch） */
+async function mmGet(url) {
+  const mock = globalThis.__vnMockMM;
+  if (typeof mock === 'function') {
+    try {
+      const j = await mock(url);
+      if (j) return j;
+    } catch (e) { /* 落到真实请求 */ }
+  }
+  const res = await fetch(url);
+  if (!res.ok) {
+    // MyMemory 的免费额度按次计，短时间内请求太多会直接 429
+    if (res.status === 429) rateLimitedAt = Date.now();
+    return null;
+  }
+  return res.json();
+}
+
+/** 一分钟内碰到过 429 就认为还在限流中（批量重新获取时用来自动收手） */
+export function wasRateLimited() {
+  return Date.now() - rateLimitedAt < 60000;
+}
+
 async function myMemoryTranslate(text) {
   try {
-    const res = await fetch(
+    const json = await mmGet(
       `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=en|zh-CN`
     );
-    if (!res.ok) return '';
-    const json = await res.json();
+    if (!json) return '';
     const t = String(json?.responseData?.translatedText || '').trim();
     if (!t || /MYMEMORY WARNING|QUERY LENGTH LIMIT|INVALID/i.test(t)) return '';
     return sanitizeZh(t, 120);
@@ -202,20 +242,31 @@ async function myMemoryTranslate(text) {
 async function myMemoryGlosses(term) {
   const out = [];
   try {
-    const res = await fetch(
+    const json = await mmGet(
       `https://api.mymemory.translated.net/get?q=${encodeURIComponent(term)}&langpair=en|zh-CN`
     );
-    if (!res.ok) return out;
-    const json = await res.json();
-    const push = (v) => {
+    if (!json) return out;
+    // 每个译法带 quality / 使用次数，用来把「常见」的排前面
+    const scored = new Map();
+    const push = (v, q = 0, u = 0) => {
       const z = sanitizeZh(v, 24);
-      if (z && !out.includes(z)) out.push(z);
+      if (!z) return;
+      const prev = scored.get(z);
+      if (prev) {
+        prev.q = Math.max(prev.q, q);
+        prev.u = Math.max(prev.u, u);
+      } else {
+        scored.set(z, { zh: z, q, u });
+      }
     };
-    push(json?.responseData?.translatedText);
+    push(json?.responseData?.translatedText, 100, 1);
     for (const m of json?.matches || []) {
-      if (out.length >= MAX_SENSES) break;
-      push(m.translation);
+      push(m.translation, Number(m.quality) || 0, Number(m['usage-count']) || 0);
     }
+    out.push(...Array.from(scored.values())
+      .sort((a, b) => b.q - a.q || b.u - a.u)
+      .slice(0, MAX_SENSES)
+      .map((x) => x.zh));
   } catch { /* 忽略 */ }
   return out;
 }
@@ -234,7 +285,7 @@ export async function translateSenses(term, senses, aiClient = null) {
       if (Array.isArray(arr)) {
         list.forEach((s, i) => {
           const z = sanitizeZh(arr[i] || '', 30);
-          if (z) s.zh = z;
+          if (z) { s.zh = z; s.fromAI = true; }
         });
       }
     } catch (e) {
@@ -246,26 +297,28 @@ export async function translateSenses(term, senses, aiClient = null) {
   // 不先用词条主译——MyMemory 的主译常常跑偏（run 会给出「得分」），
   // 按释义翻虽然啰嗦，但至少词性、语义都对得上。
   if (list.some((s) => !s.zh)) {
-    for (const s of list) {
+    // 每条释义都是一次翻译请求，MyMemory 免费额度按次算，所以只译前两条，
+    // 剩下的义项在详情里保留英文原义（够用了，也省额度）
+    for (let i = 0; i < list.length && i < 2; i++) {
+      const s = list[i];
       if (s.zh || !s.def) continue;
-      const sent = await myMemoryTranslate(s.def);
+      let sent = await myMemoryTranslate(s.def);
+      if (!sent) {
+        // 偶尔会空手而归（限速/抖动），隔一会儿再试一次
+        await wait(400);
+        sent = await myMemoryTranslate(s.def);
+      }
       const z = sanitizeZh(sent, 60);
       if (z) s.zh = toGloss(z);
     }
-    // 实在译不出来，才退回到词条主译
-    if (list.some((s) => !s.zh)) {
-      let glosses = [];
-      try { glosses = await myMemoryGlosses(term); } catch (e) { glosses = []; }
-      for (const s of list) {
-        if (!s.zh && glosses.length) s.zh = toGloss(glosses.shift());
-      }
-    }
   }
 
-  // 仍然缺中文的义项：再兜一次
-  for (const s of list) {
+  // 仍然缺中文的义项：只对前两条再兜一次（不再额外消耗额度）
+  for (let i = 0; i < list.length && i < 2; i++) {
+    const s = list[i];
     if (!s.zh && s.def) {
-      const sent = await myMemoryTranslate(s.def);
+      let sent = await myMemoryTranslate(s.def);
+      if (!sent) { await wait(400); sent = await myMemoryTranslate(s.def); }
       const z = sanitizeZh(sent, 60);
       if (z) s.zh = toGloss(z);
     }
@@ -274,8 +327,59 @@ export async function translateSenses(term, senses, aiClient = null) {
   return list;
 }
 
+/**
+ * 把 MyMemory 给的若干中文译法排成「常见在前」的一行。
+ * 判断依据：某个译法能在词典义项的中文里找到，说明它是真实用法的意思，排前面；
+ * 找不到的（多义词表里混进来的噪声，例如 run 的「得分」）往后放。
+ */
+/** 两个中文串的汉字重合度（0~1），用来判断词条译法与义项翻译是不是同一个意思 */
+function charOverlap(a, b) {
+  const clean = (t) => String(t || '').replace(/[^一-鿿]/g, '');
+  const A = Array.from(new Set(clean(a)));
+  if (!A.length) return 0;
+  const bs = new Set(Array.from(clean(b)));
+  let hit = 0;
+  for (const c of A) if (bs.has(c)) hit++;
+  return hit / A.length;
+}
+
+export function orderMeanings(glosses, senses) {
+  const zh = (senses || []).map((s) => s.zh || '').filter(Boolean);
+  const aligned = [];
+  const rest = [];
+  for (const g of glosses || []) {
+    const g1 = String(g || '').trim();
+    if (!g1) continue;
+    // 义项翻译和词条译法很少字字相同（跑步 / 奔跑的动作），按汉字重合度过半就算对得上
+    const hit = zh.some((z) => charOverlap(g1, z) >= 0.5);
+    (hit ? aligned : rest).push(g1);
+  }
+  // 有对得上的就只保留这些（把 run 的「得分」这类噪声挡在外面）；
+  // 一个都对不上说明这份词典数据没覆盖常用义，那就把译法原样留着
+  return Array.from(new Set(aligned.length ? aligned : rest)).slice(0, 4);
+}
+
+// 整词缓存：音标+义项+常见中文意思。MyMemory 免费额度很小（超了直接 429），
+// 没有这层缓存的话每次重新获取都要把整本词重翻一遍，额度几分钟就用光。
+const ENRICH_KEY = 'vn.enrich.cache.v1';
+let enrichCache = {};
+try { enrichCache = JSON.parse(localStorage.getItem(ENRICH_KEY) || '{}'); } catch { enrichCache = {}; }
+let enrichDirty = false;
+setInterval(() => {
+  if (!enrichDirty) return;
+  enrichDirty = false;
+  try { localStorage.setItem(ENRICH_KEY, JSON.stringify(enrichCache)); } catch { /* 忽略 */ }
+}, 5000);
+
 /** 组合：一次性取回一个单词的全部展示信息 */
 export async function enrichTerm(term, { aiClient = null, useDictApi = true, force = false } = {}) {
+  const ck = String(term || '').trim().toLowerCase();
+  const hit = enrichCache[ck];
+  if (!force && hit && Date.now() - hit.at < CACHE_TTL && hit.data
+      && hit.data.enrichState !== 'failed' && hit.data.enrichState !== 'notfound') {
+    return { ...hit.data, senses: (hit.data.senses || []).map((x) => ({ ...x })) };
+  }
+
   let dict = { found: false, phonetic: '', audio: '', pos: [], senses: [] };
   let failed = false;
   if (useDictApi) {
@@ -308,9 +412,18 @@ export async function enrichTerm(term, { aiClient = null, useDictApi = true, for
     senses = await translateSenses(term, senses, aiClient);
   }
 
-  const meaningZh = senses.map((s) => s.zh).filter(Boolean).slice(0, 3).join('；');
+  // 「常见意思」这一行：配了 AI 就用 AI 给的短释义；否则用 MyMemory 的译法（按常见度排）
+  let meaningZh = '';
+  if (senses.some((s) => s.fromAI && s.zh)) {
+    meaningZh = senses.map((s) => s.zh).filter(Boolean).slice(0, 3).join('；');
+  } else {
+    let glosses = [];
+    try { glosses = await myMemoryGlosses(term); } catch (e) { glosses = []; }
+    meaningZh = orderMeanings(glosses, senses).join('；');
+    if (!meaningZh) meaningZh = senses.map((s) => s.zh).filter(Boolean).slice(0, 3).join('；');
+  }
 
-  return {
+  const result = {
     phonetic: dict.phonetic || '',
     audio: dict.audio || '',
     pos: dict.pos || [],
@@ -318,6 +431,11 @@ export async function enrichTerm(term, { aiClient = null, useDictApi = true, for
     meaningZh,
     enrichState: failed ? 'failed' : senses.length ? 'done' : dict.found ? 'partial' : 'notfound',
   };
+  if (ck && result.enrichState !== 'failed') {
+    enrichCache[ck] = { at: Date.now(), data: result };
+    enrichDirty = true;
+  }
+  return result;
 }
 
 /** 判断一条单词记录是否还缺东西（用于「补全释义」按钮） */

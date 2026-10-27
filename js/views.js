@@ -10,7 +10,7 @@ import {
 import { vs, selectBook } from './viewstate.js';
 import { icon, toast, openModal, confirmDialog, promptDialog } from './ui.js';
 import { $, el, formatDate, relativeTime, esc } from './util.js';
-import { speak, playAudio, enrichTerm, missingInfo } from './dict.js';
+import { speak, playAudio, enrichTerm, missingInfo, wasRateLimited } from './dict.js';
 import { openAddWordDialog } from './entry.js';
 import { PROVIDERS, hasAI, testConnection, translateWord, translateSenses, describeWord } from './ai.js';
 import {
@@ -265,6 +265,7 @@ async function refetchAll(bookId) {
   syncRefetchButton();
   let updated = 0;
   let failed = 0;
+  let rateStop = false;
 
   for (const w of words) {
     if (refetchState.cancel) break;
@@ -279,6 +280,8 @@ async function refetchAll(bookId) {
       patch.enrichState = data.enrichState || 'done';
       if (Object.keys(patch).length > 1) { updateWord(w.id, patch); updated++; }
       else failed++;
+      // 翻译接口限流时别硬撑：剩下的改天再来，否则会把一批词的中文洗成空的
+      if (!patch.meaningZh && wasRateLimited()) { rateStop = true; }
     } catch (e) {
       console.warn('[refetch]', w.term, e);
       failed++;
@@ -286,6 +289,7 @@ async function refetchAll(bookId) {
     refetchState.done++;
     if (refetchState.bookId === vs.bookId && vs.view === 'list') renderListOnly();
     syncRefetchButton();
+    if (rateStop) break;
     await new Promise((r) => setTimeout(r, 420));
   }
 
@@ -293,7 +297,8 @@ async function refetchAll(bookId) {
   refetchState.running = false;
   renderAfterDataChange();
   let msg;
-  if (cancelled) msg = `已停止，更新了 ${updated} 个单词`;
+  if (rateStop) msg = `翻译接口限流，先更新了 ${updated} 个单词，剩下的稍后再试`;
+  else if (cancelled) msg = `已停止，更新了 ${updated} 个单词`;
   else if (failed) msg = `已更新 ${updated} 个单词，${failed} 个没查到（保留原内容）`;
   else msg = `已更新 ${updated} 个单词`;
   toast(msg, updated ? 'success' : 'default', 3600);
@@ -459,34 +464,51 @@ function renderRow({ entry, word }) {
 
   const body = el('div', { class: 'word-body' });
   const senses = Array.isArray(word.senses) ? word.senses.filter((s) => s && (s.zh || s.def)) : [];
-  if (senses.length) {
-    // 一个词性一条：词性标签 + 该义项的中文，最多显示两条；
+  // 「常见意思」这一行（meaningZh）如果能和词典义项对上，就按词性逐条展示；
+  // 对不上（词典数据里只有生僻义，例如 sad 的「吃饱了」）就只展示常见译法，避免把怪意思顶到最前
+  const commonParts = String(word.meaningZh || '').split('；').map((x) => x.trim()).filter(Boolean);
+  const senseZhList = senses.map((s) => s.zh || '').filter(Boolean);
+  const alignedWithSenses = commonParts.some((g) => senseZhList.some((z) => z.includes(g)));
+  if (senses.length && (alignedWithSenses || !commonParts.length)) {
+    // 一个词性一条：词性标签 + 该义项的中文，最多两条；
     // 中文重复的义项（v. 开始 / n. 开始）在列表里只留第一条，免得看着像重复
+    // 只挑有中文的义项：没译出来的义项在列表里露英文会很难看，详情里能看到
     const shown = [];
     const seen = new Set();
     for (const s of senses) {
-      const zh = s.zh || s.def || '';
-      if (seen.has(zh)) continue;
+      const zh = s.zh || '';
+      if (!zh || seen.has(zh)) continue;
       if (shown.length >= 2) break;
       seen.add(zh);
       shown.push(s);
     }
     const hidden = senses.length - shown.length;
-    for (const s of shown) {
-      const line = el('div', { class: 'pos-line sense' });
-      const ab = posAbbr(s.pos);
-      if (ab) line.appendChild(el('span', { class: `pos-tag ${posClass(ab)}`, text: ab }));
-      line.appendChild(el('span', { class: 'meaning-zh', text: s.zh || s.def || '' }));
+    if (shown.length) {
+      for (const s of shown) {
+        const line = el('div', { class: 'pos-line sense' });
+        const ab = posAbbr(s.pos);
+        if (ab) line.appendChild(el('span', { class: `pos-tag ${posClass(ab)}`, text: ab }));
+        line.appendChild(el('span', { class: 'meaning-zh', text: s.zh || '' }));
+        body.appendChild(line);
+      }
+      if (hidden > 0) {
+        body.appendChild(el('div', { class: 'pos-line more-note', text: `还有 ${hidden} 个义项` }));
+      }
+    } else {
+      // 一条中文都没有（词典查到了、翻译接口却没额度了）：不要拿英文释义糊在列表里
+      const line = el('div', { class: 'pos-line' });
+      const ab0 = posAbbr(senses[0].pos);
+      if (ab0) line.appendChild(el('span', { class: `pos-tag ${posClass(ab0)}`, text: ab0 }));
+      line.appendChild(el('span', { class: 'meaning-zh muted', text: '释义待补充' }));
       body.appendChild(line);
-    }
-    if (hidden > 0) {
-      body.appendChild(el('div', { class: 'pos-line more-note', text: `还有 ${hidden} 个义项` }));
     }
   } else {
     const posLine = el('div', { class: 'pos-line' });
     let shown = 0;
-    for (const p of (word.pos || []).slice(0, 3)) {
-      const ab = posAbbr(p.tag);
+    // 有义项时用主词性的标签，否则用词性列表
+    const tags = senses.length ? [senses[0].pos] : (word.pos || []).slice(0, 3).map((p) => p.tag);
+    for (const tag of tags) {
+      const ab = posAbbr(tag);
       if (!ab) continue;
       posLine.appendChild(el('span', { class: `pos-tag ${posClass(ab)}`, text: ab }));
       shown++;
@@ -606,14 +628,40 @@ export function openWordDetail(wordId, bookId) {
   head.appendChild(headTop);
 
   const detailSenses = Array.isArray(word.senses) ? word.senses.filter((s) => s && (s.zh || s.def)) : [];
+  const detailCommon = String(word.meaningZh || '').split('；').map((x) => x.trim()).filter(Boolean);
+  // 常见意思单独一行放在最前面（顺序来自常用译法），词典释义再按词性排在下面
+  const commonZh = String(word.meaningZh || '').trim();
+  // 只有在「按词性列出义项」时才需要「常见」这一行；没有义项时下面的释义就是它
+  if (commonZh && detailSenses.length) {
+    const common = el('div', { class: 'common-line' });
+    common.appendChild(el('span', { class: 'common-cap', text: '常见' }));
+    common.appendChild(el('span', { class: 'common-zh', text: commonZh }));
+    head.appendChild(common);
+  }
   if (detailSenses.length) {
     const list = el('div', { class: 'sense-list' });
+    const best = (senseZh) => {
+      if (!senseZh) return 0;
+      let top = 0;
+      for (const g of detailCommon) {
+        const chars = Array.from(new Set(String(g).replace(/[^一-鿿]/g, '')));
+        if (!chars.length) continue;
+        const set = new Set(Array.from(String(senseZh).replace(/[^一-鿿]/g, '')));
+        let hit = 0;
+        for (const c of chars) if (set.has(c)) hit++;
+        top = Math.max(top, hit / chars.length);
+      }
+      return top;
+    };
     detailSenses.forEach((s, i) => {
-      const row = el('div', { class: 'sense-item' });
+      // 和「常见意思」对不上的义项（词典里的古义，如 sad 的「吃饱了」）淡一点并标「冷僻」
+      const cold = detailCommon.length > 0 && best(s.zh) < 0.5;
+      const row = el('div', { class: `sense-item${cold ? ' cold' : ''}` });
       const line = el('div', { class: 'sense-line' });
       const ab = posAbbr(s.pos);
       if (ab) line.appendChild(el('span', { class: `pos-tag ${posClass(ab)}`, text: ab }));
       line.appendChild(el('span', { class: 'sense-zh', text: s.zh || '待补充' }));
+      if (cold) line.appendChild(el('span', { class: 'cold-cap', text: '冷僻' }));
       row.appendChild(line);
       if (s.def) row.appendChild(el('div', { class: 'sense-def', text: s.def }));
       if (s.example) row.appendChild(el('div', { class: 'sense-eg', text: `e.g. ${s.example}` }));

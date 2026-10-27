@@ -127,10 +127,12 @@ export function openAddWordDialog({ preselectBookId = null, initialTerm = '' } =
         const row = el('div', { class: 'preview-sense' });
         const ab = posAbbr(s.pos);
         if (ab) row.appendChild(el('span', { class: 'pos-tag', text: ab }));
-        row.appendChild(el('span', { class: 'preview-sense-zh', text: s.zh || s.def || '' }));
-        senseWrap.appendChild(row);
+        // 中文没取到时不把英文释义塞进来，免得看起来像「已经查到了中文」
+        row.appendChild(el('span', { class: 'preview-sense-zh', text: s.zh || '' }));
+        if (s.zh) senseWrap.appendChild(row);
       }
-      card.appendChild(senseWrap);
+      if (senseWrap.children.length) card.appendChild(senseWrap);
+      else card.appendChild(el('div', { class: 'preview-state', text: '中文释义暂时没取到（翻译接口限流），可稍后点详情里的「重新获取」' }));
     } else if (state?.pos?.length) {
       const posWrap = el('div', { class: 'preview-pos' });
       for (const p of state.pos.slice(0, 5)) {

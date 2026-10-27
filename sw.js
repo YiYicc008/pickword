@@ -1,6 +1,6 @@
 /* 离线缓存：应用外壳缓存优先，导航请求走网络优先 + 离线兜底 */
 
-const VERSION = 'vn-v1';
+const VERSION = 'vn-v3';
 const CORE = [
   './',
   './index.html',
@@ -70,19 +70,16 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // 静态资源：缓存优先，同时后台更新
+  // 静态资源：网络优先（改了代码刷新就能生效），断网时回退到缓存
   event.respondWith(
-    caches.match(req).then((hit) => {
-      const refresh = fetch(req)
-        .then((res) => {
-          if (res && res.status === 200) {
-            const copy = res.clone();
-            caches.open(VERSION).then((c) => c.put(req, copy));
-          }
-          return res;
-        })
-        .catch(() => hit);
-      return hit || refresh;
-    })
+    fetch(req)
+      .then((res) => {
+        if (res && res.status === 200) {
+          const copy = res.clone();
+          caches.open(VERSION).then((c) => c.put(req, copy));
+        }
+        return res;
+      })
+      .catch(() => caches.match(req).then((hit) => hit || Response.error()))
   );
 });
