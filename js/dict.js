@@ -79,11 +79,23 @@ function normalizeDictionary(json, term) {
   };
 }
 
+/** 只接受像中文的短释义，避免接口异常时把 JSON 之类的东西写进释义 */
+export function sanitizeZh(text) {
+  const t = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!t) return '';
+  if (t.length > 60) return '';
+  if (t.startsWith('{') || t.startsWith('[')) return '';
+  const cjk = (t.match(/[一-鿿]/g) || []).length;
+  if (!cjk) return '';
+  if (cjk / t.length < 0.3) return '';
+  return t;
+}
+
 /** 中文翻译：优先用 AI，其次用免费的 MyMemory 接口兜底 */
 export async function translateToChinese(term, context = '', aiClient = null) {
   if (aiClient) {
     try {
-      const out = await aiClient.translateWord(term, context);
+      const out = sanitizeZh(await aiClient.translateWord(term, context));
       if (out) return out;
     } catch (e) {
       console.warn('[translate] AI 翻译失败，回退免费接口', e);
@@ -99,9 +111,9 @@ async function myMemoryTranslate(text) {
     );
     if (!res.ok) return '';
     const json = await res.json();
-    const t = json?.responseData?.translatedText || '';
-    if (!t || /MYMEMORY WARNING|QUERY LENGTH LIMIT/i.test(t)) return '';
-    return t;
+    const t = String(json?.responseData?.translatedText || '').trim();
+    if (!t || /MYMEMORY WARNING|QUERY LENGTH LIMIT|INVALID/i.test(t)) return '';
+    return sanitizeZh(t);
   } catch {
     return '';
   }
@@ -121,7 +133,7 @@ export async function enrichTerm(term, { aiClient = null, useDictApi = true } = 
   let meaningZh = '';
   if (aiClient) {
     try {
-      meaningZh = await aiClient.translateWord(term, context, dict.pos);
+      meaningZh = sanitizeZh(await aiClient.translateWord(term, context, dict.pos));
     } catch (e) {
       console.warn('[enrich] AI 释义失败', e);
     }
