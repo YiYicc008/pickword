@@ -1,0 +1,984 @@
+/* 主界面视图：侧边栏、顶部、列表、详情、设置 */
+
+import {
+  getBooks, getBook, getEntriesOfBook, getEntry, getWord, bookStats,
+  addTerm, removeEntry, adjustWeight, updateWord, updateBook, deleteBook,
+  clearBook, createBook, getLinks, addLink, removeLink, getBooksOfWord,
+  getSettings, updateSettings, exportJSON, importJSON, REL_TYPES,
+} from './store.js';
+import { vs, selectBook } from './viewstate.js';
+import { icon, toast, openModal, confirmDialog, promptDialog } from './ui.js';
+import { $, el, formatDate, relativeTime, esc } from './util.js';
+import { speak, playAudio } from './dict.js';
+import { openAddWordDialog } from './entry.js';
+import { PROVIDERS, hasAI, testConnection } from './ai.js';
+import {
+  syncNow, pullRemote, pushOverride, signIn, signUp, signOut,
+  authSummary, syncConfig, SYNC_SQL,
+} from './sync.js';
+
+import { posAbbr, posClass, weightClass } from './format.js';
+
+export { posAbbr, weightClass };
+
+/* ==================== 侧边栏 ==================== */
+
+export function renderSidebar() {
+  const nav = $('#book-list');
+  nav.innerHTML = '';
+  for (const b of getBooks()) {
+    const stats = bookStats(b.id);
+    const btn = el('button', {
+      class: `book-item${b.id === vs.bookId ? ' active' : ''}`,
+      style: `--book-color:${b.color}`,
+      title: b.name,
+    });
+    btn.append(
+      el('span', { class: 'book-name', text: b.name }),
+      el('span', { class: 'book-count', text: String(stats.count) })
+    );
+    btn.addEventListener('click', () => { selectBook(b.id); closeSidebar(); render(); });
+    btn.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      openBookMenu(b);
+    });
+    nav.appendChild(btn);
+  }
+}
+
+function openBookMenu(book) {
+  const body = el('div', {});
+  const row = (label, iconName, action, danger = false) => {
+    const b = el('button', {
+      class: 'ghost-btn',
+      style: `width:100%;justify-content:flex-start;padding:11px 12px;${danger ? 'color:var(--accent)' : ''}`,
+    });
+    b.innerHTML = icon(iconName, 17) + `<span style="margin-left:9px">${label}</span>`;
+    b.addEventListener('click', () => { ref.close(); action(); });
+    return b;
+  };
+  const bodyWrap = el('div', { style: 'display:flex;flex-direction:column;gap:2px' },
+    row('重命名', 'pencil', () => openBookDialog(book)),
+    row('清空本内单词', 'trash', async () => {
+      if (await confirmDialog({ title: '清空单词本', message: `将移除「${book.name}」中的全部 ${bookStats(book.id).count} 个词条，此操作不可撤销（其他单词本不受影响）。`, confirmText: '清空', danger: true })) {
+        clearBook(book.id); toast('已清空', 'success');
+      }
+    }),
+    row('删除单词本', 'trash', async () => {
+      if (await confirmDialog({ title: '删除单词本', message: `确定删除「${book.name}」及其全部词条吗？此操作不可撤销。`, confirmText: '删除', danger: true })) {
+        const r = deleteBook(book.id);
+        if (!r.ok) { toast(r.reason, 'error'); return; }
+        if (vs.bookId === book.id) selectBook(getBooks()[0]?.id);
+        toast('已删除', 'success');
+      }
+    }, true)
+  );
+  const ref = openModal({ title: `「${book.name}」`, body: bodyWrap });
+}
+
+export function openBookDialog(book = null) {
+  const input = el('input', {
+    class: 'text-input big', value: book?.name || '', placeholder: '例如：考研核心词 / 商务英语 / 小说生词',
+    maxlength: '40',
+  });
+  const colors = ['#b8452f', '#2f5d7c', '#3f7d5a', '#c98a2e', '#6b5b95', '#a04b6b', '#3a7b8c', '#8b6f3a'];
+  let chosen = book?.color || colors[getBooks().length % colors.length];
+  const swatches = el('div', { style: 'display:flex;gap:8px;flex-wrap:wrap;margin-top:4px' });
+  const renderSwatches = () => {
+    swatches.innerHTML = '';
+    for (const c of colors) {
+      const s = el('button', {
+        style: `width:26px;height:26px;border-radius:8px;background:${c};${chosen === c ? 'outline:2px solid var(--ink);outline-offset:2px;' : 'opacity:.85'}`,
+        title: c,
+      });
+      s.addEventListener('click', () => { chosen = c; renderSwatches(); });
+      swatches.appendChild(s);
+    }
+  };
+  renderSwatches();
+
+  const body = el('div', {},
+    el('div', { class: 'field' },
+      el('div', { class: 'field-label' }, el('span', { text: '名称' })),
+      input
+    ),
+    el('div', { class: 'field' },
+      el('div', { class: 'field-label' }, el('span', { text: '标记色' })),
+      swatches
+    )
+  );
+
+  const foot = el('div', { style: 'display:flex;gap:9px;width:100%;justify-content:flex-end' });
+  const cancel = el('button', { class: 'btn btn-quiet', text: '取消' });
+  const ok = el('button', { class: 'btn btn-primary', text: book ? '保存' : '创建' });
+  cancel.addEventListener('click', () => ref.close());
+  ok.addEventListener('click', submit);
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+  foot.append(cancel, ok);
+
+  const ref = openModal({
+    title: book ? '编辑单词本' : '新建单词本',
+    subtitle: '给单词本起个名字，颜色用于在列表中快速识别',
+    body, footer: foot,
+  });
+
+  function submit() {
+    const name = input.value.trim();
+    if (!name) { toast('请输入名称', 'error'); input.focus(); return; }
+    if (book) {
+      updateBook(book.id, { name, color: chosen });
+      toast('已保存', 'success');
+    } else {
+      const b = createBook(name, { color: chosen });
+      selectBook(b.id);
+      toast(`已创建「${name}」`, 'success');
+    }
+    ref.close();
+    render();
+  }
+}
+
+/* ==================== 顶部 ==================== */
+
+export function renderTopbar() {
+  const topbar = $('#topbar');
+  topbar.innerHTML = '';
+  const book = getBook(vs.bookId);
+
+  const menu = el('button', { class: 'icon-btn only-mobile', id: 'btn-menu', 'aria-label': '打开单词本列表' });
+  menu.innerHTML = icon('menu', 20);
+  menu.addEventListener('click', openSidebar);
+  topbar.appendChild(menu);
+
+  const titleWrap = el('div', { class: 'topbar-title' });
+  const heading = el('h1', { class: 'book-heading' });
+  heading.append(
+    el('span', { class: 'dot', style: `--book-color:${book?.color || '#b8452f'}` }),
+    el('span', { text: book?.name || '单词本' })
+  );
+  const edit = el('button', { class: 'icon-btn', style: 'width:28px;height:28px', title: '重命名' });
+  edit.innerHTML = icon('pencil', 14);
+  edit.addEventListener('click', () => openBookDialog(book));
+  heading.appendChild(edit);
+  titleWrap.appendChild(heading);
+
+  const stats = book ? bookStats(book.id) : { count: 0, totalWeight: 0, maxWeight: 0 };
+  const meta = el('div', { class: 'book-meta' });
+  meta.append(
+    el('span', {}, el('b', { text: String(stats.count) }), ' 个词'),
+    el('span', {}, '总权重 ', el('b', { text: String(stats.totalWeight) })),
+    el('span', {}, '最高 ', el('b', { text: String(stats.maxWeight) }))
+  );
+  titleWrap.appendChild(meta);
+  topbar.appendChild(titleWrap);
+
+  const actions = el('div', { class: 'topbar-actions' });
+
+  const seg = el('div', { class: 'segmented', role: 'tablist' });
+  const mkTab = (key, label, iconName) => {
+    const b = el('button', {
+      class: vs.view === key ? 'active' : '',
+      role: 'tab',
+      'aria-selected': String(vs.view === key),
+    });
+    b.innerHTML = icon(iconName, 15) + `<span>${label}</span>`;
+    b.addEventListener('click', () => { vs.view = key; render(); });
+    return b;
+  };
+  seg.append(mkTab('list', '列表', 'list'), mkTab('cloud', '词云', 'graph'));
+  actions.appendChild(seg);
+
+  const addBtn = el('button', { class: 'btn btn-primary' });
+  addBtn.innerHTML = icon('plus', 16) + '<span>添加单词</span>';
+  addBtn.addEventListener('click', () => openAddWordDialog({ preselectBookId: vs.bookId }));
+  actions.appendChild(addBtn);
+
+  topbar.appendChild(actions);
+}
+
+/* ==================== 工具栏 ==================== */
+
+export function renderToolbar() {
+  const bar = $('#toolbar');
+  bar.innerHTML = '';
+  if (vs.view !== 'list') { bar.style.display = 'none'; return; }
+  bar.style.display = '';
+
+  const searchWrap = el('div', { class: 'search-box' });
+  searchWrap.innerHTML = icon('search', 16);
+  const input = el('input', {
+    id: 'search-input', type: 'search', placeholder: '搜索单词或释义…',
+    value: vs.query, autocomplete: 'off',
+  });
+  input.addEventListener('input', () => {
+    vs.query = input.value;
+    renderListOnly();
+  });
+  searchWrap.appendChild(input);
+  bar.appendChild(searchWrap);
+
+  const select = el('select', { class: 'sort-select', id: 'sort-select' });
+  const opts = [
+    ['weight-desc', '权重：高 → 低'],
+    ['weight-asc', '权重：低 → 高'],
+    ['time-desc', '加入时间：新 → 旧'],
+    ['time-asc', '加入时间：旧 → 新'],
+  ];
+  for (const [v, label] of opts) {
+    const o = el('option', { value: v, text: label });
+    if (vs.sort === v) o.selected = true;
+    select.appendChild(o);
+  }
+  select.addEventListener('change', () => { vs.sort = select.value; renderListOnly(); });
+  bar.appendChild(select);
+
+  bar.appendChild(el('div', { class: 'spacer' }));
+  const count = el('span', { class: 'result-count', id: 'result-count' });
+  bar.appendChild(count);
+  updateCount();
+}
+
+function updateCount() {
+  const c = $('#result-count');
+  if (!c) return;
+  const total = getEntriesOfBook(vs.bookId).length;
+  const shown = listData().length;
+  c.textContent = vs.query.trim() ? `筛选出 ${shown} / ${total}` : `共 ${total} 个词条`;
+}
+
+/* ==================== 列表 ==================== */
+
+function listData() {
+  let items = getEntriesOfBook(vs.bookId);
+  const q = vs.query.trim().toLowerCase();
+  if (q) {
+    items = items.filter(({ word }) =>
+      word.term.toLowerCase().includes(q) ||
+      (word.meaningZh || '').toLowerCase().includes(q) ||
+      (word.pos || []).some((p) => String(p.tag).toLowerCase().includes(q))
+    );
+  }
+  const cmp = {
+    'weight-desc': (a, b) => b.entry.weight - a.entry.weight || b.entry.firstAddedAt - a.entry.firstAddedAt,
+    'weight-asc': (a, b) => a.entry.weight - b.entry.weight || a.entry.firstAddedAt - b.entry.firstAddedAt,
+    'time-desc': (a, b) => b.entry.firstAddedAt - a.entry.firstAddedAt,
+    'time-asc': (a, b) => a.entry.firstAddedAt - b.entry.firstAddedAt,
+  }[vs.sort];
+  return items.sort(cmp);
+}
+
+export function renderListOnly() {
+  const host = $('#list-host');
+  if (!host) return;
+  host.innerHTML = '';
+  const items = listData();
+  updateCount();
+  if (!items.length) {
+    host.appendChild(vs.query.trim() ? noResultState() : emptyState());
+    return;
+  }
+  const frag = document.createDocumentFragment();
+  for (const item of items) frag.appendChild(renderRow(item));
+  host.appendChild(frag);
+}
+
+function renderRow({ entry, word }) {
+  const row = el('div', { class: 'word-row', 'data-word': word.id, 'data-entry': entry.id });
+  if (vs.highlightId === word.id) {
+    row.classList.add('flash');
+    setTimeout(() => { vs.highlightId = null; }, 1600);
+  }
+
+  const main = el('div', { class: 'word-main' });
+  const term = el('span', {
+    class: `word-term${word.term.includes(' ') ? ' is-phrase' : ''}`,
+    text: word.term,
+  });
+  main.appendChild(term);
+  if (word.phonetic) main.appendChild(el('span', { class: 'phonetic', text: word.phonetic }));
+
+  const speakBtn = el('button', { class: 'speak-btn', title: '发音', 'aria-label': `朗读 ${word.term}` });
+  speakBtn.innerHTML = icon('volume', 14);
+  speakBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (word.audio) { if (!playAudio(word.audio)) speak(word.term, getSettings().ttsRate); }
+    else speak(word.term, getSettings().ttsRate);
+  });
+  main.appendChild(speakBtn);
+
+  const body = el('div', { class: 'word-body' });
+  const posLine = el('div', { class: 'pos-line' });
+  let shown = 0;
+  for (const p of (word.pos || []).slice(0, 3)) {
+    const ab = posAbbr(p.tag);
+    if (!ab) continue;
+    posLine.appendChild(el('span', { class: `pos-tag ${posClass(ab)}`, text: ab }));
+    shown++;
+  }
+  if (word.meaningZh) {
+    posLine.appendChild(el('span', { class: 'meaning-zh', text: word.meaningZh }));
+  } else if (shown === 0) {
+    posLine.appendChild(el('span', { class: 'meaning-zh muted', text: '释义待补充' }));
+  }
+  body.appendChild(posLine);
+
+  const side = el('div', { class: 'word-side' });
+  const pill = el('span', {
+    class: `weight-pill ${weightClass(entry.weight)}`,
+    title: `权重 ${entry.weight}（重复录入会累加）`,
+  });
+  pill.innerHTML = `<span>${entry.weight}</span>`;
+  side.appendChild(pill);
+  side.appendChild(el('span', { class: 'added-time', text: formatDate(entry.firstAddedAt) }));
+
+  const acts = el('div', { class: 'row-actions' });
+  const mkAct = (name, title, fn, danger) => {
+    const b = el('button', { title, 'aria-label': title, class: danger ? 'danger' : '' });
+    b.innerHTML = icon(name, 15);
+    b.addEventListener('click', (e) => { e.stopPropagation(); fn(); });
+    return b;
+  };
+  acts.append(
+    mkAct('plus', '再记一次（权重 +1）', () => {
+      addTerm(word.term, [vs.bookId]);
+      vs.highlightId = word.id;
+      toast(`「${word.term}」权重 +1`, 'success', 1500);
+    }),
+    mkAct('trash', '从本单词本移除', async () => {
+      if (await confirmDialog({
+        title: '移除词条',
+        message: `从「${getBook(vs.bookId)?.name}」移除「${word.term}」？该词在其他单词本中的记录不受影响。`,
+        confirmText: '移除', danger: true,
+      })) { removeEntry(entry.id); toast('已移除'); }
+    }, true)
+  );
+  side.appendChild(acts);
+
+  row.append(main, body, side);
+  row.addEventListener('click', () => openWordDetail(word.id, vs.bookId));
+  return row;
+}
+
+function emptyState() {
+  const wrap = el('div', { class: 'empty' });
+  const mark = el('div', { class: 'empty-mark' });
+  mark.innerHTML = icon('book', 30);
+  wrap.appendChild(mark);
+  wrap.appendChild(el('h3', { text: '这个单词本还是空的' }));
+  wrap.appendChild(el('p', { text: '添加第一个单词吧。输入单词后会自动获取音标、发音、词性和中文释义。' }));
+  const btn = el('button', { class: 'btn btn-primary' });
+  btn.innerHTML = icon('plus', 16) + '<span>添加单词</span>';
+  btn.addEventListener('click', () => openAddWordDialog({ preselectBookId: vs.bookId }));
+  wrap.appendChild(btn);
+  return wrap;
+}
+
+function noResultState() {
+  const wrap = el('div', { class: 'empty' });
+  const mark = el('div', { class: 'empty-mark' });
+  mark.innerHTML = icon('search', 28);
+  wrap.appendChild(mark);
+  wrap.appendChild(el('h3', { text: '没有匹配的单词' }));
+  wrap.appendChild(el('p', { text: `「${vs.query}」在本单词本中没有找到。可以清空搜索继续浏览。` }));
+  const btn = el('button', { class: 'btn btn-quiet', text: '清空搜索' });
+  btn.addEventListener('click', () => {
+    vs.query = '';
+    const input = $('#search-input');
+    if (input) input.value = '';
+    renderListOnly();
+  });
+  wrap.appendChild(btn);
+  return wrap;
+}
+
+/* ==================== 单词详情 ==================== */
+
+export function openWordDetail(wordId, bookId) {
+  const word = getWord(wordId);
+  if (!word) return;
+  const entry = getEntry(bookId, wordId);
+
+  const body = el('div', {});
+
+  const head = el('div', { class: 'preview-card', style: 'margin-bottom:18px' });
+  const headTop = el('div', { class: 'preview-head' });
+  headTop.append(
+    el('span', { class: 'preview-term', text: word.term }),
+    el('span', { class: 'preview-phonetic', text: word.phonetic || '' })
+  );
+  const sp = el('button', { class: 'speak-btn', title: '发音' });
+  sp.innerHTML = icon('volume', 15);
+  sp.addEventListener('click', () => {
+    if (word.audio) { if (!playAudio(word.audio)) speak(word.term, getSettings().ttsRate); }
+    else speak(word.term, getSettings().ttsRate);
+  });
+  headTop.appendChild(sp);
+  head.appendChild(headTop);
+
+  if (word.pos?.length) {
+    const posWrap = el('div', { class: 'preview-pos' });
+    for (const p of word.pos.slice(0, 5)) {
+      posWrap.appendChild(el('span', { class: `pos-tag ${posClass(posAbbr(p.tag))}`, text: posAbbr(p.tag) }));
+    }
+    head.appendChild(posWrap);
+  }
+  if (word.meaningZh) head.appendChild(el('div', { class: 'preview-meaning', text: word.meaningZh }));
+  body.appendChild(head);
+
+  // 权重
+  const weightField = el('div', { class: 'field' });
+  weightField.appendChild(el('div', { class: 'field-label' }, el('span', { text: '权重' })));
+  const wRow = el('div', { style: 'display:flex;align-items:center;gap:12px' });
+  const pill = el('span', { class: `weight-pill ${weightClass(entry?.weight || 1)}`, style: 'font-size:15px;padding:6px 13px' });
+  const paintPill = () => {
+    pill.className = `weight-pill ${weightClass(entry?.weight || 1)}`;
+    pill.innerHTML = icon('weight', 13) + `<span>${entry?.weight || 0}</span>`;
+  };
+  paintPill();
+  const minus = el('button', { class: 'btn btn-quiet', text: '−1', style: 'padding:6px 12px' });
+  const plus = el('button', { class: 'btn btn-quiet', text: '+1', style: 'padding:6px 12px' });
+  minus.addEventListener('click', () => { if (entry) { adjustWeight(entry.id, -1); paintPill(); render(); } });
+  plus.addEventListener('click', () => { if (entry) { adjustWeight(entry.id, 1); paintPill(); render(); } });
+  wRow.append(minus, pill, plus);
+  weightField.appendChild(wRow);
+  weightField.appendChild(el('div', { class: 'field-hint', text: '首次加入为 1，同一单词重复加入同一单词本时 +1。' }));
+  body.appendChild(weightField);
+
+  // 中文释义编辑
+  const meaningField = el('div', { class: 'field' });
+  meaningField.appendChild(el('div', { class: 'field-label' }, el('span', { text: '中文释义' })));
+  const meaningInput = el('textarea', { class: 'text-area', rows: '2', placeholder: '可手动修改' });
+  meaningInput.value = word.meaningZh || '';
+  meaningField.appendChild(meaningInput);
+  body.appendChild(meaningField);
+
+  // 所在单词本
+  const booksField = el('div', { class: 'field' });
+  booksField.appendChild(el('div', { class: 'field-label' }, el('span', { text: '所在单词本' })));
+  const chips = el('div', { class: 'book-chips' });
+  for (const { book, entry: e } of getBooksOfWord(wordId)) {
+    const chip = el('span', {
+      class: 'book-chip on',
+      style: `--chip-color:${book.color};--chip-bg:${book.color}1a`,
+    });
+    chip.append(el('span', { text: `${book.name} · ${e.weight}` }));
+    const rm = el('button', { title: '移除', style: 'margin-left:2px;color:var(--ink-3);display:grid;place-items:center' });
+    rm.innerHTML = icon('x', 12);
+    rm.addEventListener('click', () => {
+      if (e.bookId === bookId) { toast('不能从当前单词本移除，请用列表上的移除按钮', 'error'); return; }
+      removeEntry(e.id);
+      openWordDetail(wordId, bookId);
+      render();
+    });
+    chip.appendChild(rm);
+    chips.appendChild(chip);
+  }
+  booksField.appendChild(chips);
+  body.appendChild(booksField);
+
+  // 关联关系
+  const links = getLinks(bookId).filter((l) => l.a === wordId || l.b === wordId);
+  if (links.length) {
+    const relField = el('div', { class: 'field' });
+    relField.appendChild(el('div', { class: 'field-label' }, el('span', { text: '单词关系' })));
+    const list = el('div', { style: 'display:flex;flex-direction:column;gap:6px' });
+    for (const l of links) {
+      const otherId = l.a === wordId ? l.b : l.a;
+      const other = getWord(otherId);
+      if (!other) continue;
+      const rowEl = el('div', {
+        style: 'display:flex;align-items:center;gap:9px;padding:7px 10px;border:1px solid var(--line);border-radius:9px;font-size:13px',
+      });
+      const dot = el('span', {
+        style: `width:8px;height:8px;border-radius:3px;background:${REL_TYPES[l.type]?.color || '#999'};flex:none`,
+      });
+      rowEl.append(dot, el('span', { text: REL_TYPES[l.type]?.label || '关联' }),
+        el('span', { text: '·', style: 'color:var(--ink-4)' }),
+        el('span', { text: other.term, style: 'font-family:var(--serif);font-weight:600' }));
+      const del = el('button', { style: 'margin-left:auto;color:var(--ink-3)' });
+      del.innerHTML = icon('x', 13);
+      del.addEventListener('click', () => { removeLink(l.id); openWordDetail(wordId, bookId); });
+      rowEl.appendChild(del);
+      list.appendChild(rowEl);
+    }
+    relField.appendChild(list);
+    body.appendChild(relField);
+  }
+
+  const foot = el('div', { style: 'display:flex;gap:9px;width:100%' });
+  const del = el('button', { class: 'btn btn-quiet', style: 'color:var(--accent)' });
+  del.innerHTML = icon('trash', 15) + '<span>从本单词本移除</span>';
+  del.addEventListener('click', async () => {
+    if (!entry) return;
+    if (await confirmDialog({ title: '移除词条', message: `从「${getBook(bookId)?.name}」移除「${word.term}」？`, confirmText: '移除', danger: true })) {
+      removeEntry(entry.id); ref.close(); render(); toast('已移除');
+    }
+  });
+  const save = el('button', { class: 'btn btn-primary', text: '保存修改', style: 'margin-left:auto' });
+  save.addEventListener('click', () => {
+    updateWord(wordId, { meaningZh: meaningInput.value.trim() });
+    toast('已保存', 'success');
+    ref.close();
+    render();
+  });
+  foot.append(del, save);
+
+  const ref = openModal({
+    title: word.term,
+    subtitle: `加入于 ${formatDate(entry?.firstAddedAt || word.createdAt)}`,
+    body, footer: foot, wide: true,
+  });
+}
+
+/* ==================== 设置 ==================== */
+
+export function openSettingsDialog() {
+  const s = getSettings();
+  const body = el('div', {});
+
+  /* AI */
+  const aiSec = el('div', { class: 'settings-section' });
+  aiSec.appendChild(el('h3', { text: 'AI 服务' }));
+  aiSec.appendChild(el('p', { text: '用于智能分类、中文释义和词团关系生成。支持 DeepSeek、OpenAI 及任何兼容 OpenAI 格式的接口。' }));
+
+  const providerSel = el('select', { class: 'text-input', style: 'margin-bottom:12px' });
+  for (const [k, v] of Object.entries(PROVIDERS)) {
+    const o = el('option', { value: k, text: v.label });
+    if (s.aiProvider === k) o.selected = true;
+    providerSel.appendChild(o);
+  }
+  aiSec.appendChild(providerSel);
+
+  const baseInput = el('input', { class: 'text-input', placeholder: '接口地址，如 https://api.deepseek.com/v1', value: s.aiBaseUrl });
+  const modelInput = el('input', { class: 'text-input', placeholder: '模型名，如 deepseek-chat', value: s.aiModel, style: 'margin-top:10px' });
+  const keyInput = el('input', { class: 'text-input', type: 'password', placeholder: 'API Key（只保存在本机）', value: s.aiKey, style: 'margin-top:10px' });
+  aiSec.append(baseInput, modelInput, keyInput);
+
+  providerSel.addEventListener('change', () => {
+    const p = PROVIDERS[providerSel.value];
+    baseInput.value = p.baseUrl;
+    modelInput.value = p.model;
+  });
+
+  const testRow = el('div', { style: 'display:flex;align-items:center;gap:10px;margin-top:12px' });
+  const testBtn = el('button', { class: 'btn btn-quiet' });
+  testBtn.innerHTML = icon('refresh', 15) + '<span>测试连接</span>';
+  const testResult = el('span', { style: 'font-size:12.5px;color:var(--ink-3)' });
+  testBtn.addEventListener('click', async () => {
+    updateSettings({ aiProvider: providerSel.value, aiBaseUrl: baseInput.value.trim(), aiModel: modelInput.value.trim(), aiKey: keyInput.value.trim() });
+    testBtn.disabled = true;
+    testResult.textContent = '测试中…';
+    try {
+      const r = await testConnection();
+      testResult.style.color = 'var(--green)';
+      testResult.textContent = `连接正常（${r.slice(0, 12)}）`;
+    } catch (e) {
+      testResult.style.color = 'var(--accent)';
+      testResult.textContent = String(e.message || e).slice(0, 60);
+    } finally { testBtn.disabled = false; }
+  });
+  testRow.append(testBtn, testResult);
+  aiSec.appendChild(testRow);
+  body.appendChild(aiSec);
+
+  /* 词典 */
+  const dictSec = el('div', { class: 'settings-section' });
+  dictSec.appendChild(el('h3', { text: '词典与发音' }));
+  dictSec.appendChild(el('p', { text: '开启后，录入单词时自动从 Free Dictionary API 获取音标、词性与英文释义。' }));
+
+  const enrichRow = el('div', { class: 'setting-row' });
+  const enrichSwitch = el('button', { class: `switch${s.autoEnrich ? ' on' : ''}`, 'aria-label': '自动获取单词信息' });
+  enrichSwitch.addEventListener('click', () => {
+    enrichSwitch.classList.toggle('on');
+    updateSettings({ autoEnrich: enrichSwitch.classList.contains('on') });
+  });
+  enrichRow.append(
+    el('div', { class: 'label' }, el('span', { text: '录入时自动获取词典信息' }), el('small', { text: '关闭后需手动填写释义' })),
+    enrichSwitch
+  );
+  dictSec.appendChild(enrichRow);
+
+  const rateRow = el('div', { class: 'setting-row' });
+  const rate = el('input', { type: 'range', min: '0.5', max: '1.4', step: '0.1', value: String(s.ttsRate), style: 'width:140px' });
+  const rateVal = el('span', { style: 'font-size:12.5px;color:var(--ink-3);width:34px', text: `${s.ttsRate}×` });
+  rate.addEventListener('input', () => { rateVal.textContent = `${rate.value}×`; updateSettings({ ttsRate: Number(rate.value) }); });
+  rateRow.append(el('div', { class: 'label' }, el('span', { text: '朗读速度' })), rate, rateVal);
+  dictSec.appendChild(rateRow);
+  body.appendChild(dictSec);
+
+  /* 数据 */
+  const dataSec = el('div', { class: 'settings-section' });
+  dataSec.appendChild(el('h3', { text: '数据' }));
+  dataSec.appendChild(el('p', { text: '所有数据默认保存在本机浏览器中。建议定期导出备份。' }));
+
+  const dataRow = el('div', { style: 'display:flex;gap:8px;flex-wrap:wrap' });
+  const expBtn = el('button', { class: 'btn btn-quiet' });
+  expBtn.innerHTML = icon('download', 15) + '<span>导出备份</span>';
+  expBtn.addEventListener('click', () => {
+    const blob = new Blob([exportJSON()], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `词汇备份_${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    toast('已导出', 'success');
+  });
+
+  const impBtn = el('button', { class: 'btn btn-quiet' });
+  impBtn.innerHTML = icon('upload', 15) + '<span>导入备份</span>';
+  const fileInput = el('input', { type: 'file', accept: '.json,application/json', style: 'display:none' });
+  impBtn.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', async () => {
+    const f = fileInput.files?.[0];
+    if (!f) return;
+    try {
+      const text = await f.text();
+      importJSON(text, 'merge');
+      toast('导入完成', 'success');
+      render();
+    } catch (e) { toast(`导入失败：${e.message}`, 'error'); }
+    fileInput.value = '';
+  });
+  dataRow.append(expBtn, impBtn, fileInput);
+  dataSec.appendChild(dataRow);
+  body.appendChild(dataSec);
+
+  /* 同步 */
+  const syncSec = el('div', { class: 'settings-section' });
+  syncSec.appendChild(el('h3', { text: '云同步' }));
+  syncSec.appendChild(el('p', { text: '配置 Supabase 后，可在 Windows、iPad、鸿蒙三端登录同一个账号并同步数据。' }));
+  const syncBtn = el('button', { class: 'btn btn-quiet' });
+  syncBtn.innerHTML = icon('sync', 15) + '<span>配置云同步</span>';
+  syncBtn.addEventListener('click', () => { ref.close(); openSyncDialog(); });
+  syncSec.appendChild(syncBtn);
+  body.appendChild(syncSec);
+
+  const foot = el('div', { style: 'display:flex;gap:9px;width:100%;justify-content:flex-end' });
+  const close = el('button', { class: 'btn btn-primary', text: '完成' });
+  close.addEventListener('click', () => {
+    updateSettings({
+      aiProvider: providerSel.value,
+      aiBaseUrl: baseInput.value.trim(),
+      aiModel: modelInput.value.trim(),
+      aiKey: keyInput.value.trim(),
+    });
+    ref.close();
+    render();
+  });
+  foot.appendChild(close);
+
+  const ref = openModal({ title: '设置', body, footer: foot, wide: true });
+}
+
+/* ==================== 同步 ==================== */
+
+export function openSyncDialog() {
+  const body = el('div', {});
+  let auth = authSummary();
+
+  /* ---------- 1. 项目配置 ---------- */
+  const cfgSec = el('div', { class: 'settings-section' });
+  cfgSec.appendChild(el('h3', { text: '1 · Supabase 项目' }));
+  cfgSec.appendChild(el('p', {
+    text: '在 supabase.com 免费建一个项目，复制 Project URL 与 anon public key 填进来。三端填同一套配置、登录同一个账号，就能共享同一份单词本。',
+  }));
+
+  const s = getSettings();
+  const urlInput = el('input', {
+    class: 'text-input', placeholder: 'https://xxxxxxxx.supabase.co', value: s.supabaseUrl || '',
+    autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false',
+  });
+  const keyInput = el('input', {
+    class: 'text-input', placeholder: 'anon public key（eyJhbGciOi…）', value: s.supabaseKey || '',
+    style: 'margin-top:9px', autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false',
+  });
+  const cfgRow = el('div', { style: 'display:flex;gap:9px;margin-top:11px;align-items:center;flex-wrap:wrap' });
+  const saveCfg = el('button', { class: 'btn btn-quiet', text: '保存配置' });
+  const cfgState = el('span', { style: 'font-size:12px;color:var(--ink-3)' });
+  saveCfg.addEventListener('click', () => {
+    updateSettings({ supabaseUrl: urlInput.value.trim().replace(/\/+$/, ''), supabaseKey: keyInput.value.trim() });
+    const c = syncConfig();
+    cfgState.style.color = c.ready ? 'var(--green)' : 'var(--accent)';
+    cfgState.textContent = c.ready ? '✓ 已保存' : 'URL 或 key 看起来不完整';
+  });
+  cfgRow.append(saveCfg, cfgState);
+  cfgSec.append(urlInput, keyInput, cfgRow);
+  body.appendChild(cfgSec);
+
+  /* ---------- 2. 账号 ---------- */
+  const accSec = el('div', { class: 'settings-section' });
+  accSec.appendChild(el('h3', { text: '2 · 账号' }));
+  const accInfo = el('p', {});
+  accSec.appendChild(accInfo);
+
+  const form = el('div', {});
+  const emailInput = el('input', {
+    class: 'text-input', type: 'email', placeholder: '邮箱', value: auth?.email || '',
+    autocomplete: 'email', autocapitalize: 'off', spellcheck: 'false',
+  });
+  const pwdInput = el('input', {
+    class: 'text-input', type: 'password', placeholder: '密码（至少 6 位）', style: 'margin-top:9px',
+    autocomplete: 'current-password',
+  });
+  form.append(emailInput, pwdInput);
+
+  const authRow = el('div', { style: 'display:flex;gap:9px;margin-top:11px;align-items:center;flex-wrap:wrap' });
+  const loginBtn = el('button', { class: 'btn btn-primary', text: '登录' });
+  const signupBtn = el('button', { class: 'btn btn-quiet', text: '注册新账号' });
+  const outBtn = el('button', { class: 'btn btn-quiet', text: '退出登录' });
+  const accMsg = el('span', { style: 'font-size:12px;color:var(--ink-3);flex:1;min-width:0' });
+  authRow.append(loginBtn, signupBtn, outBtn, accMsg);
+  accSec.append(form, authRow);
+  body.appendChild(accSec);
+
+  /* ---------- 3. 同步 ---------- */
+  const syncSec = el('div', { class: 'settings-section' });
+  syncSec.appendChild(el('h3', { text: '3 · 同步' }));
+  const syncInfo = el('p', {});
+  syncSec.appendChild(syncInfo);
+  const syncRow = el('div', { style: 'display:flex;gap:9px;align-items:center;flex-wrap:wrap' });
+  const syncBtn = el('button', { class: 'btn btn-primary' });
+  syncBtn.innerHTML = icon('refresh', 15) + '<span>立即同步</span>';
+  const pullBtn = el('button', { class: 'btn btn-quiet', text: '从云端恢复' });
+  const pushBtn = el('button', { class: 'btn btn-quiet', text: '上传本机' });
+  const syncMsg = el('span', { style: 'font-size:12px;color:var(--ink-3);flex:1;min-width:0' });
+  syncRow.append(syncBtn, pullBtn, pushBtn);
+  syncSec.append(syncRow, syncMsg);
+  body.appendChild(syncSec);
+
+  /* ---------- 4. 建表 SQL ---------- */
+  const sqlSec = el('details', { class: 'settings-section' });
+  const sqlSum = el('summary', { style: 'cursor:pointer;font-size:12.5px;color:var(--ink-2)' });
+  sqlSum.textContent = '首次使用：点开复制建表 SQL（在 Supabase → SQL Editor 里执行一次）';
+  sqlSec.appendChild(sqlSum);
+  const sqlBox = el('textarea', {
+    class: 'text-area', readonly: 'readonly', rows: '9',
+    style: 'margin-top:10px;font-family:var(--mono);font-size:11.5px;line-height:1.6',
+    value: SYNC_SQL,
+  });
+  const copyRow = el('div', { style: 'display:flex;gap:9px;margin-top:8px;align-items:center' });
+  const copyBtn = el('button', { class: 'btn btn-quiet', text: '复制 SQL' });
+  copyBtn.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(SYNC_SQL);
+      toast('已复制', 'success');
+    } catch {
+      sqlBox.select();
+      toast('请手动复制（已全选）', 'default');
+    }
+  });
+  copyRow.appendChild(copyBtn);
+  sqlSec.append(sqlBox, copyRow);
+  body.appendChild(sqlSec);
+
+  /* ---------- 状态刷新 ---------- */
+  function refreshAuth() {
+    auth = authSummary();
+    const logged = Boolean(auth);
+    form.style.display = logged ? 'none' : '';
+    loginBtn.style.display = logged ? 'none' : '';
+    signupBtn.style.display = logged ? 'none' : '';
+    outBtn.style.display = logged ? '' : 'none';
+    syncSec.style.display = logged ? '' : 'none';
+
+    if (auth) {
+      accInfo.textContent = `已登录：${auth.email}`;
+      syncInfo.textContent = auth.lastSyncAt
+        ? `上次同步：${relativeTime(auth.lastSyncAt)}。同步会把云端与这台设备的数据合并（权重取较大值），再整体回传。`
+        : '还没有同步过。建议先在一台设备上点「上传本机」，其他设备再点「立即同步」拉取。';
+    } else {
+      accInfo.textContent = '用邮箱注册一个账号；三端登录同一个账号即可同步。';
+    }
+  }
+
+  function wrapBusy(btn, fn) {
+    return async () => {
+      const old = btn.innerHTML;
+      btn.disabled = true;
+      try { await fn(); } catch (e) {
+        const m = String(e.message || e);
+        accMsg.style.color = 'var(--accent)';
+        syncMsg.style.color = 'var(--accent)';
+        accMsg.textContent = m;
+        syncMsg.textContent = m;
+        toast(m, 'error', 4200);
+      } finally { btn.disabled = false; btn.innerHTML = old; }
+    };
+  }
+
+  loginBtn.addEventListener('click', wrapBusy(loginBtn, async () => {
+    const email = emailInput.value.trim();
+    const pwd = pwdInput.value;
+    if (!email || !pwd) throw new Error('请填写邮箱和密码');
+    const c = syncConfig();
+    if (!c.ready) throw new Error('请先填写并保存 Supabase 配置');
+    accMsg.style.color = 'var(--ink-3)';
+    accMsg.textContent = '登录中…';
+    await signIn(email, pwd);
+    pwdInput.value = '';
+    refreshAuth();
+    toast('登录成功', 'success');
+  }));
+
+  signupBtn.addEventListener('click', wrapBusy(signupBtn, async () => {
+    const email = emailInput.value.trim();
+    const pwd = pwdInput.value;
+    if (!email || !pwd) throw new Error('请填写邮箱和密码');
+    if (pwd.length < 6) throw new Error('密码至少 6 位');
+    const c = syncConfig();
+    if (!c.ready) throw new Error('请先填写并保存 Supabase 配置');
+    accMsg.style.color = 'var(--ink-3)';
+    accMsg.textContent = '注册中…';
+    const r = await signUp(email, pwd);
+    if (r.needConfirm) {
+      accMsg.style.color = 'var(--amber)';
+      accMsg.textContent = '注册成功，请到邮箱点击确认链接后再回来登录';
+      toast('请查收确认邮件', 'default', 4200);
+    } else {
+      pwdInput.value = '';
+      refreshAuth();
+      toast('注册并登录成功', 'success');
+    }
+  }));
+
+  outBtn.addEventListener('click', async () => {
+    signOut();
+    refreshAuth();
+    toast('已退出登录');
+  });
+
+  syncBtn.addEventListener('click', wrapBusy(syncBtn, async () => {
+    if (!auth) throw new Error('请先登录');
+    syncMsg.style.color = 'var(--ink-3)';
+    syncMsg.textContent = '同步中…';
+    const r = await syncNow();
+    syncMsg.style.color = 'var(--green)';
+    syncMsg.textContent = r.message;
+    refreshAuth();
+    window.dispatchEvent(new CustomEvent('vn:data-changed'));
+    toast(r.message, 'success');
+  }));
+
+  pullBtn.addEventListener('click', wrapBusy(pullBtn, async () => {
+    if (!auth) throw new Error('请先登录');
+    const ok = await confirmDialog({
+      title: '从云端恢复',
+      message: '将用云端数据完整替换这台设备上的数据，本机未同步的内容会丢失。确定继续吗？',
+      confirmText: '替换', danger: true,
+    });
+    if (!ok) return;
+    syncMsg.style.color = 'var(--ink-3)';
+    syncMsg.textContent = '拉取中…';
+    const data = await pullRemote();
+    if (!data) { syncMsg.textContent = '云端还没有数据'; return; }
+    importJSON(JSON.stringify(data), 'replace');
+    updateSettings({ lastSyncAt: Date.now() });
+    syncMsg.style.color = 'var(--green)';
+    syncMsg.textContent = '已用云端数据替换本机';
+    window.dispatchEvent(new CustomEvent('vn:data-changed'));
+  }));
+
+  pushBtn.addEventListener('click', wrapBusy(pushBtn, async () => {
+    if (!auth) throw new Error('请先登录');
+    const ok = await confirmDialog({
+      title: '上传本机',
+      message: '将用这台设备的数据覆盖云端数据（其他设备之后再同步时会以云端为准）。确定继续吗？',
+      confirmText: '上传', danger: true,
+    });
+    if (!ok) return;
+    syncMsg.style.color = 'var(--ink-3)';
+    syncMsg.textContent = '上传中…';
+    await pushOverride();
+    syncMsg.style.color = 'var(--green)';
+    syncMsg.textContent = '已上传到云端';
+    toast('已上传', 'success');
+  }));
+
+  const foot = el('div', { style: 'display:flex;gap:9px;width:100%;justify-content:flex-end' });
+  const close = el('button', { class: 'btn btn-quiet', text: '关闭' });
+  foot.appendChild(close);
+
+  refreshAuth();
+  const ref = openModal({ title: '云同步', subtitle: 'Windows · 鸿蒙 · iPad 共用一份单词本', body, footer: foot, wide: true });
+  close.addEventListener('click', () => ref.close());
+}
+export function openAboutDialog() {
+  const body = el('div', {});
+  body.appendChild(el('p', {
+    text: '一个可以在 Windows、iPad、鸿蒙三端使用的电子英语单词本。',
+    style: 'font-size:13.5px;color:var(--ink-2);line-height:1.8;margin:0 0 16px',
+  }));
+  const list = el('div', { style: 'display:flex;flex-direction:column;gap:10px;font-size:13px;color:var(--ink-2);line-height:1.7' });
+  const item = (t, d) => {
+    const r = el('div', { style: 'display:flex;gap:10px' });
+    r.append(el('span', { style: 'color:var(--accent);flex:none', text: '·' }), el('span', { html: `<b>${esc(t)}</b>　${esc(d)}` }));
+    return r;
+  };
+  list.append(
+    item('多单词本', '自定义名称与颜色，独立计数'),
+    item('权重', '首次加入为 1，重复录入自动 +1，直接显示在单词旁'),
+    item('AI 分类', '录入时自动判断该归入哪几个单词本'),
+    item('词云', '力导向关系图，词团可重叠且视觉可辨'),
+    item('安装', '浏览器里选择「安装到桌面」或「添加到主屏幕」即可离线使用')
+  );
+  body.appendChild(list);
+  openModal({ title: '关于「词汇」', body });
+}
+
+/* ==================== 移动端侧栏 ==================== */
+
+export function openSidebar() {
+  $('#sidebar')?.classList.add('open');
+  const scrim = $('#scrim');
+  if (scrim) {
+    scrim.hidden = false;
+    scrim.onclick = closeSidebar;
+  }
+}
+
+export function closeSidebar() {
+  $('#sidebar')?.classList.remove('open');
+  const scrim = $('#scrim');
+  if (scrim) { scrim.hidden = true; scrim.onclick = null; }
+}
+
+/* ==================== 总渲染 ==================== */
+
+let lastKey = '';
+
+export function render() {
+  const books = getBooks();
+  if (!books.length) return;
+  if (!vs.bookId || !getBook(vs.bookId)) selectBook(books[0].id);
+
+  renderSidebar();
+  renderTopbar();
+  renderToolbar();
+
+  const key = `${vs.bookId}|${vs.view}`;
+  const view = $('#view');
+
+  if (key !== lastKey) {
+    lastKey = key;
+    view.innerHTML = '';
+    if (vs.view === 'list') {
+      const content = el('div', { class: 'content', id: 'content' });
+      const host = el('div', { class: 'word-list', id: 'list-host' });
+      content.appendChild(host);
+      view.appendChild(content);
+    }
+  }
+
+  if (vs.view === 'list') {
+    renderListOnly();
+  } else {
+    import('./cloudview.js').then((m) => m.renderCloudView(view));
+  }
+}
+
+/** 只更新列表，不重建工具栏（保持搜索框焦点） */
+export function renderAfterDataChange() {
+  if (vs.view === 'list') renderListOnly();
+  renderSidebar();
+  renderTopbar();
+}
