@@ -29,7 +29,7 @@
 | 三端 | 同一个网页适配桌面 / 平板 / 手机，可「添加到主屏幕」离线使用 |
 | 同步 | 可选 Supabase：邮箱登录，三端共享同一份数据 |
 
-> **在线试用**：部署到 GitHub Pages 后访问 `https://<你的用户名>.github.io/<仓库名>/index.html?demo`（带 `?demo` 会载入示例数据）。
+> **在线试用**：部署到 GitHub Pages 后访问 `https://YiYicc008.github.io/vocabulary/index.html?demo`（带 `?demo` 会载入示例数据）。
 > 没部署也能用：见下面「五分钟上手」。
 
 界面语言：简体中文　｜　代码：原生 JavaScript（ES Modules），零依赖、无构建步骤
@@ -387,13 +387,13 @@ git revert <commit>        # 撤销某次提交
    git add .
    git commit -m "init: 词汇 · 电子英语单词本"
    git branch -M main
-   git remote add origin https://github.com/<你的用户名>/<仓库名>.git
+   git remote add origin https://github.com/YiYicc008/vocabulary.git
    git push -u origin main
    ```
 
 2. 仓库 **Settings → Pages**：Source 选 `Deploy from a branch`，Branch 选 `main`、目录 `/(root)`，Save。
 
-3. 等一两分钟，访问 `https://<你的用户名>.github.io/<仓库名>/`。
+3. 等一两分钟，访问 `https://YiYicc008.github.io/vocabulary/`。
    想直接看示例数据就加 `?demo`：`…/index.html?demo`。
 
 4. iPad / 手机打开同一个地址 → 分享 → **添加到主屏幕**；Windows 上 Chrome / Edge 地址栏右侧的安装图标也能装。
