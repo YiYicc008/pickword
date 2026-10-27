@@ -4,7 +4,7 @@ import {
   getBook, getWord, getEntry, getEntriesOfBook, getLinks, getClusters, getClouds,
   createCluster, updateCluster, deleteCluster, createCloud, updateCloud, deleteCloud,
   applyAutoClusters, replaceLinksFor, addLink, adjustWeight, removeEntry,
-  REL_TYPES, CLUSTER_COLORS, getSettings, toggleClusterMember,
+  REL_TYPES, CLUSTER_COLORS, getSettings, toggleClusterMember, DEMO_MODE,
 } from './store.js';
 import { icon, toast, openModal, confirmDialog, promptDialog } from './ui.js';
 import { el, looksEnglish } from './util.js';
@@ -98,6 +98,7 @@ export function renderCloudView(host) {
   host.appendChild(root);
 
   const wc = new WordCloud(stage);
+  if (DEMO_MODE) window.__vnCloud = wc;
   current = wc;
   wc.onSelect = (id) => { selId = id; paintDetail(id); };
 
@@ -278,7 +279,9 @@ export function renderCloudView(host) {
 
   /* ---------- 自动整理 ---------- */
   async function autoOrganize(bookId) {
-    const list = deriveClusters(bookId);
+    // 与手动词团同名的不重复生成，避免管理器里出现两个同名词团
+    const manualNames = new Set(getClusters(bookId).filter((c) => !c.auto).map((c) => c.name));
+    const list = deriveClusters(bookId).filter((c) => !manualNames.has(c.name));
     if (!list.length) {
       toast('没有发现可用来自动分组的词形或关系，可手动创建词团', 'default', 3200);
       return;

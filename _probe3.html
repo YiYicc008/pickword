@@ -7,17 +7,17 @@
   html, body { margin: 0; padding: 0; background: #d8d4cc; }
   #frame { display: block; border: 0; position: absolute; left: 0; top: 0; background: #f6f2ea; }
   #log { position: fixed; right: 0; bottom: 0; z-index: 9; font: 11px/1.4 monospace;
-         background: #fff9; color: #201d19; padding: 4px 6px; white-space: pre; }
+         background: #fffc; color: #201d19; padding: 4px 6px; white-space: pre; }
 </style>
 </head>
 <body>
 <iframe id="frame"></iframe>
 <pre id="log"></pre>
 <script>
+const NL = String.fromCharCode(10);
 const q = new URLSearchParams(location.search);
 const w = +(q.get('w') || 390);
 const h = +(q.get('h') || 844);
-const quiet = q.get('quiet') === '1';
 const sel = q.get('sel') || '';
 const delay = +(q.get('delay') || 1600);
 const frame = document.getElementById('frame');
@@ -30,7 +30,7 @@ frame.style.height = h + 'px';
 frame.src = q.get('src') || 'index.html?demo';
 
 function report(msg) {
-  log.textContent = quiet ? '' : msg;
+  log.textContent = msg;
 }
 
 frame.addEventListener('load', () => {
@@ -49,7 +49,7 @@ frame.addEventListener('load', () => {
                     ' right=' + Math.round(r.right));
         }
       }
-      if (bad.length) lines.push('OVERFLOW:\n' + bad.slice(0, 12).join('\n'));
+      if (bad.length) lines.push('OVERFLOW:' + NL + bad.slice(0, 12).join(NL));
       if (sel) {
         const target = doc.querySelector(sel);
         if (target) {
@@ -60,19 +60,17 @@ frame.addEventListener('load', () => {
         }
       }
       if (q.get('js')) {
-        // eslint-disable-next-line no-new-func
         new Function('doc', 'win', q.get('js'))(doc, frame.contentWindow);
         lines.push('ran js');
       }
-      if (q.get('after')) {
-        setTimeout(() => {
-          const dlg = doc.querySelector('.modal');
-          lines.push('modal=' + (dlg ? 'yes' : 'no'));
-          report(lines.join('\n'));
-        }, 500);
-      } else {
-        report(lines.join('\n'));
-      }
+      const finish = () => {
+        const dlg = doc.querySelector('.modal');
+        lines.push('modal=' + (dlg ? 'yes' : 'no'));
+        lines.push('RESULT=' + (frame.contentWindow.__result || ''));
+        report(lines.join(NL));
+      };
+      if (q.get('after')) setTimeout(finish, +(q.get('after') || 500));
+      else finish();
     } catch (e) {
       report('PROBE ERROR ' + e.message);
     }

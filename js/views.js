@@ -905,7 +905,7 @@ export function openSyncDialog() {
 export function openAboutDialog() {
   const body = el('div', {});
   body.appendChild(el('p', {
-    text: '一个可以在 Windows、iPad、鸿蒙三端使用的电子英语单词本。',
+    text: '一个可以在 Windows、iPad、鸿蒙三端使用的电子英语单词本。数据默认保存在本机，可离线使用；配置 Supabase 后三端共享同一份单词本。',
     style: 'font-size:13.5px;color:var(--ink-2);line-height:1.8;margin:0 0 16px',
   }));
   const list = el('div', { style: 'display:flex;flex-direction:column;gap:10px;font-size:13px;color:var(--ink-2);line-height:1.7' });
@@ -922,7 +922,39 @@ export function openAboutDialog() {
     item('安装', '浏览器里选择「安装到桌面」或「添加到主屏幕」即可离线使用')
   );
   body.appendChild(list);
-  openModal({ title: '关于「词汇」', body });
+
+  const books = getBooks();
+  const canSeed = books.length === 1 && getEntriesOfBook(books[0].id).length === 0;
+  const foot = el('div', { style: 'display:flex;gap:9px;align-items:center;width:100%' });
+  foot.appendChild(el('span', { style: 'font-size:11.5px;color:var(--ink-3);flex:1', text: 'v1.0 · 本地优先 · 离线可用' }));
+  if (canSeed) {
+    const demoBtn = el('button', { class: 'btn btn-quiet', text: '载入示例数据' });
+    demoBtn.addEventListener('click', async () => {
+      demoBtn.disabled = true;
+      try {
+        const mod = await import('./demo.js');
+        const seeded = mod.seedDemo();
+        if (seeded) {
+          selectBook(getBooks()[0].id);
+          renderAfterDataChange();
+          toast('已载入示例数据：两个单词本、9 个词团', 'success', 3000);
+        } else {
+          toast('当前数据不满足示例载入条件', 'default');
+        }
+      } catch (err) {
+        console.warn('[demo]', err);
+        toast('示例数据载入失败', 'error');
+      }
+      close();
+    });
+    foot.appendChild(demoBtn);
+  }
+  const ok = el('button', { class: 'btn btn-primary', text: '知道了' });
+  foot.appendChild(ok);
+
+  const modal = openModal({ title: '关于「词汇」', body, footer: foot });
+  ok.addEventListener('click', () => modal.close());
+  const close = () => modal.close();
 }
 
 /* ==================== 移动端侧栏 ==================== */
