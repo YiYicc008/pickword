@@ -213,19 +213,85 @@
 
 ## 四、多端同步（可选）
 
-数据默认只存在本机浏览器里。要在 Windows / 鸿蒙 / iPad 之间同步，用 Supabase（免费）：
+**这一步只解决"三端看到同一份数据"。** 不配也能用，只是每台设备各自存各的（浏览器 `localStorage`）。
+同步用 [Supabase](https://supabase.com) 免费版就够：一个账号、一张表、邮箱密码登录，数据存在你自己的项目里。
 
-1. 到 <https://supabase.com> 注册并新建一个项目；
-2. 打开 `设置 → 云同步`，填入项目的 **Project URL** 和 **anon public key**，点保存；
-3. 在同一窗口展开 **建表 SQL**，复制后在 Supabase 的 SQL Editor 里执行一次（会建 `vn_state` 表并开启行级安全）；
-4. 用邮箱 + 密码 **注册新账号**，然后 **登录**；
-5. 点 **立即同步**：先拉取云端、与本地合并（同一单词取较大权重），再上传。
+### 1. 建一个 Supabase 项目（约 3 分钟）
 
-- `从云端恢复` 会用云端数据**完整覆盖**本机，慎用；
-- `上传本机` 会用本机数据覆盖云端；
-- 三端登录同一个账号后各自点一次"立即同步"即可。
+1. 打开 <https://supabase.com> → `Start your project`，用 GitHub 或邮箱注册（免费计划足够）；
+2. `New project`：填项目名（例如 `vocabulary`）、设置**数据库密码**（自己记好，一般用不到）、
+   区域选离你近的（如 `Singapore` / `Tokyo`）→ `Create new project`，等 1–2 分钟初始化完成。
 
-> AI Key、Supabase 配置也属于本机数据，会随同步一起保存，这样换设备不用重填。
+### 2. 拿到两个值
+
+进入项目后点左侧 **Project Settings → API**（新版在 `Data API` / `API Keys`），复制：
+
+| 名称 | 形如 | 用途 |
+| --- | --- | --- |
+| **Project URL** | `https://abcdefgh.supabase.co` | 数据地址 |
+| **anon public key** | `eyJhbGciOi…`（很长） | 匿名公开密钥，可放在前端 |
+
+> `service_role` key **不要**填进来，它绕过所有安全策略，泄露等于把数据库交出去。
+> anon key 本身是公开的，安全性靠第 3 步的行级安全（RLS）保证，不是靠藏这个 key。
+
+### 3. 建表（只做一次）
+
+1. 左侧 **SQL Editor** → `New query`；
+2. 把 [`supabase/schema.sql`](supabase/schema.sql) 的全部内容粘进去 → **Run**；
+3. 看到 `Success. No rows returned` 就好。它做三件事：
+   建 `public.vn_state` 表（`user_id` / `data jsonb` / `updated_at`）、打开 RLS、加策略
+   `using (auth.uid() = user_id)` —— **每个账号只能读写自己那一行**。
+
+想确认：左侧 **Table Editor** 里能看到 `vn_state`，且右上角写着 `RLS enabled`。
+
+### 4. 账号设置
+
+左侧 **Authentication → Providers → Email**：默认是开的。
+默认 `Confirm email` 也开着——注册后要**点邮件里的链接**才能登录。
+自己用不想来回收邮件，可以关掉 `Confirm email`（Authentication → Providers → Email → 取消勾选），注册后直接能登录。
+
+### 5. 在应用里填配置
+
+应用 → **设置 → 云同步**：
+
+1. 第 1 段把 **Project URL** 和 **anon public key** 填进去，点 **保存配置**；
+2. 第 2 段填邮箱 + 密码（至少 6 位），点 **注册新账号**；若开了邮件确认，先去邮箱点链接；
+3. 点 **登录**，成功后这一段会显示当前账号与上次同步时间。
+
+（配置和 AI Key 一样只存在本机浏览器，会随同步一起写进云端，换设备登录后不用重填。）
+
+### 6. 三端同步
+
+在 Windows 上登录后点 **立即同步**，这一台的数据就上云了；
+iPad、鸿蒙手机打开同一个网址 → 设置 → 云同步 → 填同样的 URL/key → 登录同一个账号 → **立即同步**。
+
+同步逻辑：**先拉云端 → 与本机合并 → 再上传**。合并规则是按 `单词本 id + 单词 id` 对齐，
+同一个单词在两台设备上权重不同时**取较大的那个**（不会因为同步而"掉权重"），关系和词团也按 id 合并。
+
+| 按钮 | 行为 | 什么时候用 |
+| --- | --- | --- |
+| 立即同步 | 拉取 + 合并 + 上传 | 日常，三端各点一次即可 |
+| 从云端恢复 | 用云端数据**完整覆盖本机** | 这一台误删/换设备要拿云端为准 |
+| 上传本机 | 用本机数据**覆盖云端** | 云端乱了、本机才是对的 |
+
+### 常见问题
+
+**填好点登录，提示 `Invalid login credentials`？**
+账号没注册成功（多半是没点邮件里的确认链接），或密码不对。可以重新点「注册新账号」再试。
+
+**提示"云端的 vn_state 数据表还没有创建"？**
+第 3 步的 SQL 没跑成功。回 SQL Editor 重跑一遍 `supabase/schema.sql`。
+
+**登录成功但同步报 401 / 权限错误？**
+多半是策略缺了。SQL Editor 里执行 `alter table public.vn_state enable row level security;`
+再确认策略存在：`select * from pg_policies where tablename = 'vn_state';`
+
+**免费额度够用吗？**
+够。免费计划每月 500 MB 数据库 + 5 GB 出网；整个单词本同步一次只有几十到几百 KB。
+
+**会不会把我的单词看到别人的？**
+不会。表开了 RLS，策略是 `auth.uid() = user_id`，数据库层面就拒绝跨账号读；
+你的数据在**你自己的** Supabase 项目里，不是存在我或作者那里。
 
 ---
 
@@ -331,6 +397,14 @@ git revert <commit>        # 撤销某次提交
    想直接看示例数据就加 `?demo`：`…/index.html?demo`。
 
 4. iPad / 手机打开同一个地址 → 分享 → **添加到主屏幕**；Windows 上 Chrome / Edge 地址栏右侧的安装图标也能装。
+
+**谁打开这个网址？看到的是谁的数据？**
+
+- 公开仓库的 Pages 是公开的：拿到链接的人都能打开页面，不需要登录。
+- 但每个人打开的是**他自己的**空单词本 —— 数据存在各自浏览器的 `localStorage` 里，互相看不到。
+  `?demo` 只是往**他自己**的浏览器里灌一份示例数据，不影响作者的数据。
+- 谁想同步，注册的是**他自己的** Supabase 账号（第四节），按 RLS 只能读写自己那一行。
+- 私有仓库要用 Pages 需要 GitHub Pro；公开仓库免费。
 
 几点说明：
 
