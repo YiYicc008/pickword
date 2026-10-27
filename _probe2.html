@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>layout probe</title>
+<style>
+html,body{margin:0;background:#8a8a8a}
+#wrap{position:relative;overflow:hidden;background:#fff;margin:0 auto}
+#f{display:block;border:0;width:100%;height:100%}
+#log{font:12px monospace;white-space:pre-wrap;padding:8px;background:#fff;border-top:2px solid #b00;margin:0}
+body.quiet #log{display:none}
+</style>
+</head><body>
+<div id="wrap"><iframe id="f" src="index.html?demo"></iframe></div>
+<pre id="log">waiting…</pre>
+<script>
+const q = new URLSearchParams(location.search);
+const W = Number(q.get('w') || 390);
+const H = Number(q.get('h') || 844);
+if (q.get('quiet')) document.body.classList.add('quiet');
+const wrap = document.getElementById('wrap');
+wrap.style.width = W + 'px';
+wrap.style.height = H + 'px';
+const frame = document.getElementById('f');
+frame.src = q.get('src') || 'index.html?demo';
+
+const log = (s) => { document.getElementById('log').textContent = s; };
+window.addEventListener('error', (e) => log('ONERROR ' + e.message));
+frame.addEventListener('load', () => {
+  setTimeout(() => {
+    try {
+      const w = frame.contentWindow;
+      const d = w.document;
+      const vw = w.innerWidth;
+      const lines = ['viewport=' + vw + ' scrollWidth=' + d.documentElement.scrollWidth + ' bodyScr=' + d.body.scrollWidth];
+      const bad = [];
+      d.querySelectorAll('*').forEach((n) => {
+        const r = n.getBoundingClientRect();
+        if (r.width === 0) return;
+        if (r.right > vw + 0.5) {
+          const sel = n.tagName.toLowerCase() + (n.id ? '#' + n.id : '') + (n.className && typeof n.className === 'string' ? '.' + n.className.trim().split(/\s+/).join('.') : '');
+          bad.push(sel.slice(0, 90) + '  right=' + Math.round(r.right) + ' w=' + Math.round(r.width));
+        }
+      });
+      log(lines.join('\n') + '\n--- over ' + vw + ' (' + bad.length + ') ---\n' + bad.slice(0, 40).join('\n'));
+    } catch (err) { log('ERR ' + err.message); }
+  }, 3200);
+});
+</script>
+</body></html>

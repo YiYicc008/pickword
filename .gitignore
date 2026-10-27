@@ -3,3 +3,4 @@
 _backups/
 _probe.html
 *.log
+_snapshot.py

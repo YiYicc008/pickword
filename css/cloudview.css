@@ -296,6 +296,8 @@
 @media (max-width: 760px) {
   .only-mobile { display: inline-flex; }
   .cloud-view { padding: 8px 12px 10px; gap: 8px; }
+  .legend-row { flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; }
+  .rel-legend { display: none; }
   .cloud-tools .btn-sm span { display: none; }
   .cloud-tools .btn-sm { padding: 7px 9px; }
   .legend-name { max-width: 120px; }

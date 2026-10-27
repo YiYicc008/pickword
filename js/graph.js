@@ -48,6 +48,7 @@ export class WordCloud {
   setData({ nodes, links, clusters }) {
     const prev = this.nodeMap;
     this.clusters = clusters.map((c) => ({ ...c }));
+    this._compact = this.w && this.w < 560 ? 0.78 : 1;
     this.nodes = nodes.map((n) => {
       const old = prev.get(n.id);
       return {
@@ -56,7 +57,7 @@ export class WordCloud {
         y: old ? old.y : (Math.random() - 0.5) * 320,
         vx: 0,
         vy: 0,
-        r: 11 + Math.min(n.weight, 14) * 1.35,
+        r: (11 + Math.min(n.weight, 14) * 1.35) * (this._compact || 1),
       };
     });
     this.nodeMap = new Map(this.nodes.map((n) => [n.id, n]));
@@ -208,6 +209,34 @@ export class WordCloud {
       }
     }
 
+    // 词团之间轻推，避免两个团糊成一团（重叠但可分辨）
+    const cents = [];
+    for (const c of this.clusters) {
+      if (this.hiddenClusters.has(c.id)) continue;
+      const ms = c.memberIds.map((id) => this.nodeMap.get(id)).filter(Boolean);
+      if (!ms.length) continue;
+      let cx0 = 0, cy0 = 0, rr = 0;
+      for (const m of ms) { cx0 += m.x; cy0 += m.y; rr = Math.max(rr, m.r); }
+      cents.push({ ms, cx: cx0 / ms.length, cy: cy0 / ms.length, rad: rr + 20 });
+    }
+    for (let i = 0; i < cents.length; i++) {
+      for (let j = i + 1; j < cents.length; j++) {
+        const A = cents[i];
+        const B = cents[j];
+        const dx = B.cx - A.cx;
+        const dy = B.cy - A.cy;
+        const d = Math.hypot(dx, dy) || 1;
+        const minD = A.rad + B.rad;
+        if (d > minD * 1.7) continue;
+        const f = (minD * 1.25 - d) * 0.0011 * alpha;
+        if (f <= 0) continue;
+        const ux = dx / d;
+        const uy = dy / d;
+        for (const m of A.ms) { m.vx -= ux * f * 0.5; m.vy -= uy * f * 0.5; }
+        for (const m of B.ms) { m.vx += ux * f * 0.5; m.vy += uy * f * 0.5; }
+      }
+    }
+
     // 向心 + 位置更新
     let energy = 0;
     for (const nd of nodes) {
@@ -256,14 +285,15 @@ export class WordCloud {
     const bw = maxX - minX;
     const bh = maxY - minY;
     if (bw < 1 || bh < 1) return;
-    const target = Math.max(0.6, this.w / this.h);
+    const target = Math.max(0.55, this.w / this.h);
     const cur = bw / bh;
     if (Math.abs(cur - target) < 0.05) return;
-    const f = Math.min(Math.max(target / cur, 1 / 1.9), 1.9);
     const cx = (minX + maxX) / 2;
     const cy = (minY + maxY) / 2;
-    const sx = cur < target ? f : 1;
-    const sy = cur < target ? 1 : f;
+    let sx = 1;
+    let sy = 1;
+    if (cur < target) sx = Math.min(target / cur, 1.9);
+    else sy = Math.min(cur / target, 1.9);
     for (const n of this.nodes) {
       n.x = cx + (n.x - cx) * sx;
       n.y = cy + (n.y - cy) * sy;
@@ -451,6 +481,7 @@ export class WordCloud {
 
     const visible = this.visibleNodes;
     const visSet = new Set(visible.map((n) => n.id));
+    this._labelBoxes = [];
 
     // 词团光晕（先画，位于底层）
     for (const c of this.clusters) {
@@ -477,9 +508,10 @@ export class WordCloud {
       ctx.setLineDash([]);
     }
 
-    // 节点
-    const showLabel = t.k > 0.42;
-    for (const n of visible) {
+    // 节点（权重高的先画，标签优先占位）
+    const showLabel = t.k > 0.34;
+    const ordered = [...visible].sort((a, b) => (b.weight || 1) - (a.weight || 1));
+    for (const n of ordered) {
       this._drawNode(ctx, n, showLabel);
     }
 
@@ -541,21 +573,28 @@ export class WordCloud {
     ctx.stroke();
 
     // 词团名
-    if (this.transform.k > 0.5) {
+    if (this.transform.k > 0.3) {
       let top = expanded[0];
       for (const p of expanded) if (p.y < top.y) top = p;
-      ctx.font = `600 12px ${getComputedStyle(document.body).fontFamily}`;
+      ctx.font = `600 ${12 / (this.transform.k || 1)}px ${getComputedStyle(document.body).fontFamily}`;
       const label = cluster.name;
       const w = ctx.measureText(label).width;
       const lx = top.x;
       const ly = top.y - 14;
       ctx.fillStyle = 'rgba(255,253,248,.88)';
-      roundRect(ctx, lx - w / 2 - 8, ly - 16, w + 16, 20, 7);
+      const lh = 20 / (this.transform.k || 1);
+      roundRect(ctx, lx - w / 2 - 7 / (this.transform.k || 1), ly - lh + 4 / (this.transform.k || 1), w + 14 / (this.transform.k || 1), lh, 6 / (this.transform.k || 1));
       ctx.fill();
       ctx.fillStyle = hexAlpha(color, 0.95);
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(label, lx, ly - 6);
+      ctx.fillText(label, lx, ly - 6 / (this.transform.k || 1));
+      this._labelBoxes.push({
+        x0: lx - w / 2 - 6 / (this.transform.k || 1),
+        x1: lx + w / 2 + 6 / (this.transform.k || 1),
+        y0: ly - lh,
+        y1: ly + 2 / (this.transform.k || 1),
+      });
     }
   }
 
@@ -619,14 +658,31 @@ export class WordCloud {
 
     // 标签：统一放在节点下方，描边光晕保证在任何底色上都清楚
     if (!showLabel) return;
-    const fontSize = Math.min(14, 11.5 + Math.min(n.weight, 8) * 0.35);
+    const kk = this.transform.k || 1;
+    const fontSize = 12 / kk;
+    if (kk < 0.34) return;
     ctx.font = `600 ${fontSize}px ${getComputedStyle(document.body).fontFamily}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     const label = n.term;
-    const ty = n.y + r + 12;
+    const ty = n.y + r + 11 / kk;
+    // 标签避让：与已画标签相交时让位（选中/悬停/权重高的词始终保留）
+    const tw = ctx.measureText(label).width;
+    const pad = 2 / kk;
+    const box = {
+      x0: n.x - tw / 2 - pad,
+      x1: n.x + tw / 2 + pad,
+      y0: ty - fontSize * 0.62,
+      y1: ty + fontSize * 0.62,
+    };
+    const clash = this._labelBoxes.some(
+      (b) => !(box.x1 < b.x0 || box.x0 > b.x1 || box.y1 < b.y0 || box.y0 > b.y1)
+    );
+    if (clash && !isSel && !isHover) return;
+    this._labelBoxes.push(box);
+
     ctx.lineJoin = 'round';
-    ctx.lineWidth = 3.6;
+    ctx.lineWidth = 3.2 / kk;
     ctx.strokeStyle = 'rgba(246,242,234,.94)';
     ctx.strokeText(label, n.x, ty);
     ctx.fillStyle = isSel ? '#b8452f' : '#201d19';
@@ -634,15 +690,16 @@ export class WordCloud {
 
     // 权重角标
     if (n.weight > 1 && this.transform.k > 0.7) {
+      const bs = 1 / (this.transform.k || 1);
       const bx = n.x + r * 0.72;
       const by = n.y - r * 0.72;
-      const br = 7.5;
+      const br = 7.2 * bs;
       ctx.beginPath();
       ctx.arc(bx, by, br, 0, TAU);
       ctx.fillStyle = '#b8452f';
       ctx.fill();
       ctx.fillStyle = '#fff8f4';
-      ctx.font = `700 9.5px ${getComputedStyle(document.body).fontFamily}`;
+      ctx.font = `700 ${9.5 * bs}px ${getComputedStyle(document.body).fontFamily}`;
       ctx.fillText(String(n.weight), bx, by + 0.5);
     }
   }
