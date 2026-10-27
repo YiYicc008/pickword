@@ -18,9 +18,20 @@ import {
   authSummary, syncConfig, SYNC_SQL,
 } from './sync.js';
 
-import { posAbbr, posClass, weightClass } from './format.js';
+import { posAbbr, posTag, posClass, weightClass } from './format.js';
 
 export { posAbbr, weightClass };
+
+/** 两个中文串的汉字重合度（0~1），用来判断两条释义是不是同一个意思 */
+function zhOverlap(a, b) {
+  const chars = (t) => Array.from(new Set(String(t || '').replace(/[^一-鿿]/g, '')));
+  const A = chars(a);
+  if (!A.length) return 0;
+  const bs = new Set(chars(b));
+  let hit = 0;
+  for (const c of A) if (bs.has(c)) hit++;
+  return hit / A.length;
+}
 
 /* ==================== 侧边栏 ==================== */
 
@@ -469,7 +480,7 @@ function renderRow({ entry, word }) {
   const commonParts = String(word.meaningZh || '').split('；').map((x) => x.trim()).filter(Boolean);
   const senseZhList = senses.map((s) => s.zh || '').filter(Boolean);
   const alignedWithSenses = commonParts.some((g) => senseZhList.some((z) => z.includes(g)));
-  if (senses.length && (alignedWithSenses || !commonParts.length)) {
+  if (senses.length && (word.sensesManual || alignedWithSenses || !commonParts.length)) {
     // 一个词性一条：词性标签 + 该义项的中文，最多两条；
     // 中文重复的义项（v. 开始 / n. 开始）在列表里只留第一条，免得看着像重复
     // 只挑有中文的义项：没译出来的义项在列表里露英文会很难看，详情里能看到
@@ -627,58 +638,108 @@ export function openWordDetail(wordId, bookId) {
   headTop.appendChild(sp);
   head.appendChild(headTop);
 
-  const detailSenses = Array.isArray(word.senses) ? word.senses.filter((s) => s && (s.zh || s.def)) : [];
-  const detailCommon = String(word.meaningZh || '').split('；').map((x) => x.trim()).filter(Boolean);
-  // 常见意思单独一行放在最前面（顺序来自常用译法），词典释义再按词性排在下面
-  const commonZh = String(word.meaningZh || '').trim();
-  // 只有在「按词性列出义项」时才需要「常见」这一行；没有义项时下面的释义就是它
-  if (commonZh && detailSenses.length) {
-    const common = el('div', { class: 'common-line' });
-    common.appendChild(el('span', { class: 'common-cap', text: '常见' }));
-    common.appendChild(el('span', { class: 'common-zh', text: commonZh }));
-    head.appendChild(common);
+  // 释义卡片：词性和中文都能直接改，拖动左侧手柄调整顺序（列表里取前两条）
+  const senseList = el('div', { class: 'se-list' });
+  const seed = (Array.isArray(word.senses) ? word.senses : []).filter((s) => s && (s.zh || s.def));
+  if (!seed.length && word.meaningZh) {
+    seed.push({ pos: word.pos?.[0]?.tag || '', zh: word.meaningZh, def: '' });
   }
-  if (detailSenses.length) {
-    const list = el('div', { class: 'sense-list' });
-    const best = (senseZh) => {
-      if (!senseZh) return 0;
-      let top = 0;
-      for (const g of detailCommon) {
-        const chars = Array.from(new Set(String(g).replace(/[^一-鿿]/g, '')));
-        if (!chars.length) continue;
-        const set = new Set(Array.from(String(senseZh).replace(/[^一-鿿]/g, '')));
-        let hit = 0;
-        for (const c of chars) if (set.has(c)) hit++;
-        top = Math.max(top, hit / chars.length);
-      }
-      return top;
-    };
-    detailSenses.forEach((s, i) => {
-      // 和「常见意思」对不上的义项（词典里的古义，如 sad 的「吃饱了」）淡一点并标「冷僻」
-      const cold = detailCommon.length > 0 && best(s.zh) < 0.5;
-      const row = el('div', { class: `sense-item${cold ? ' cold' : ''}` });
-      const line = el('div', { class: 'sense-line' });
-      const ab = posAbbr(s.pos);
-      if (ab) line.appendChild(el('span', { class: `pos-tag ${posClass(ab)}`, text: ab }));
-      line.appendChild(el('span', { class: 'sense-zh', text: s.zh || '待补充' }));
-      if (cold) line.appendChild(el('span', { class: 'cold-cap', text: '冷僻' }));
-      row.appendChild(line);
-      if (s.def) row.appendChild(el('div', { class: 'sense-def', text: s.def }));
-      if (s.example) row.appendChild(el('div', { class: 'sense-eg', text: `e.g. ${s.example}` }));
-      list.appendChild(row);
+
+  function attachDrag(handle, card) {
+    handle.addEventListener('pointerdown', (e) => {
+      if (e.button && e.button !== 0) return;
+      e.preventDefault();
+      try { handle.setPointerCapture(e.pointerId); } catch (err) { /* 合成事件没有真实指针 */ }
+      card.classList.add('dragging');
+      const addBtn = senseList.querySelector('.se-add');
+      const onMove = (ev) => {
+        const others = Array.from(senseList.querySelectorAll('.se-card')).filter((c) => c !== card);
+        let placed = false;
+        for (const c of others) {
+          const r = c.getBoundingClientRect();
+          if (ev.clientY < r.top + r.height / 2) {
+            senseList.insertBefore(card, c);
+            placed = true;
+            break;
+          }
+        }
+        if (!placed && addBtn) senseList.insertBefore(card, addBtn);
+        paintTags();
+      };
+      const onUp = () => {
+        card.classList.remove('dragging');
+        handle.removeEventListener('pointermove', onMove);
+        handle.removeEventListener('pointerup', onUp);
+        handle.removeEventListener('pointercancel', onUp);
+        paintTags();
+      };
+      handle.addEventListener('pointermove', onMove);
+      handle.addEventListener('pointerup', onUp);
+      handle.addEventListener('pointercancel', onUp);
     });
-    head.appendChild(list);
-  } else {
-    if (word.pos?.length) {
-      const posWrap = el('div', { class: 'preview-pos' });
-      for (const p of word.pos.slice(0, 5)) {
-        posWrap.appendChild(el('span', { class: `pos-tag ${posClass(posAbbr(p.tag))}`, text: posAbbr(p.tag) }));
-      }
-      head.appendChild(posWrap);
-    }
-    if (word.meaningZh) head.appendChild(el('div', { class: 'preview-meaning', text: word.meaningZh }));
-    else head.appendChild(el('div', { class: 'preview-state', text: '还没有查到释义，可点下方「重新获取」' }));
   }
+
+  function paintTags() {
+    const list = Array.from(senseList.querySelectorAll('.se-card'));
+    const firstZh = list[0]?.querySelector('.se-zh')?.value.trim() || '';
+    list.forEach((card, i) => {
+      const tag = card.querySelector('.se-tag');
+      if (!tag) return;
+      const zh = card.querySelector('.se-zh').value.trim();
+      // 只对「词典抓来的」义项判冷僻；用户自己补的义项不判
+      const cold = i > 0 && !!firstZh && !!zh && !!card.dataset.def && zhOverlap(zh, firstZh) < 0.5;
+      card.classList.toggle('cold', cold);
+      if (i === 0) { tag.textContent = '常用'; tag.classList.remove('hide'); }
+      else if (cold) { tag.textContent = '冷僻'; tag.classList.remove('hide'); }
+      else tag.classList.add('hide');
+    });
+  }
+
+  function makeCard(src) {
+    const card = el('div', { class: 'se-card' });
+    card.dataset.def = src.def || '';
+    card.dataset.eg = src.example || '';
+    const handle = el('span', { class: 'se-handle', title: '按住拖动可以调整顺序' });
+    handle.innerHTML = icon('menu', 15);
+    const main = el('div', { class: 'se-main' });
+    const line = el('div', { class: 'se-line' });
+    const posIn = el('input', { class: 'se-pos', type: 'text', placeholder: '词性', autocomplete: 'off' });
+    posIn.value = src.pos ? posAbbr(src.pos) : '';
+    const zhIn = el('input', { class: 'se-zh', type: 'text', placeholder: '中文释义', autocomplete: 'off' });
+    zhIn.value = src.zh || '';
+    const tag = el('span', { class: 'se-tag hide', text: '常用' });
+    const delBtn = el('button', { class: 'se-del', title: '删除这条释义', type: 'button' });
+    delBtn.innerHTML = icon('x', 13);
+    line.append(posIn, zhIn, tag, delBtn);
+    main.appendChild(line);
+    if (src.def) main.appendChild(el('div', { class: 'se-def', text: src.def }));
+    if (src.example) main.appendChild(el('div', { class: 'se-eg', text: `e.g. ${src.example}` }));
+    card.append(handle, main);
+    delBtn.addEventListener('click', () => { card.remove(); paintTags(); });
+    attachDrag(handle, card);
+    return card;
+  }
+
+  const addCard = el('button', { class: 'se-card se-add', type: 'button' });
+  addCard.innerHTML = icon('plus', 14) + '<span>添加释义</span>';
+  addCard.addEventListener('click', () => {
+    const card = makeCard({ pos: '', zh: '', def: '' });
+    senseList.insertBefore(card, addCard);
+    paintTags();
+    card.querySelector('.se-pos').focus();
+  });
+
+  seed.forEach((s) => senseList.appendChild(makeCard(s)));
+  senseList.appendChild(addCard);
+  senseList.appendChild(
+    el('p', {
+      class: 'se-hint',
+      text: '拖动左侧手柄可调整顺序；列表里只显示前两条。',
+    }),
+  );
+  senseList.addEventListener('input', () => paintTags());
+  head.appendChild(senseList);
+  paintTags();
   body.appendChild(head);
 
   // 权重
@@ -699,14 +760,6 @@ export function openWordDetail(wordId, bookId) {
   weightField.appendChild(wRow);
   weightField.appendChild(el('div', { class: 'field-hint', text: '首次加入为 1，同一单词重复加入同一单词本时 +1。' }));
   body.appendChild(weightField);
-
-  // 中文释义编辑
-  const meaningField = el('div', { class: 'field' });
-  meaningField.appendChild(el('div', { class: 'field-label' }, el('span', { text: '中文释义' })));
-  const meaningInput = el('textarea', { class: 'text-area', rows: '2', placeholder: '可手动修改' });
-  meaningInput.value = word.meaningZh || '';
-  meaningField.appendChild(meaningInput);
-  body.appendChild(meaningField);
 
   // 所在单词本
   const booksField = el('div', { class: 'field' });
@@ -801,7 +854,24 @@ export function openWordDetail(wordId, bookId) {
   });
   const save = el('button', { class: 'btn btn-primary', text: '保存修改', style: 'margin-left:auto' });
   save.addEventListener('click', () => {
-    updateWord(wordId, { meaningZh: meaningInput.value.trim() });
+    const out = Array.from(senseList.querySelectorAll('.se-card'))
+      .filter((c) => !c.classList.contains('se-add'))
+      .map((c) => ({
+        pos: posTag(c.querySelector('.se-pos').value),
+        zh: c.querySelector('.se-zh').value.trim(),
+        def: c.dataset.def || '',
+        example: c.dataset.eg || '',
+      }))
+      .filter((s) => s.zh || s.pos);
+    const meaningZh = out.map((s) => s.zh).filter(Boolean).slice(0, 4).join('；');
+    const tags = Array.from(new Set(out.map((s) => s.pos).filter(Boolean)));
+    updateWord(wordId, {
+      senses: out,
+      meaningZh,
+      pos: tags.length ? tags.map((t) => ({ tag: t })) : word.pos,
+      sensesManual: true,
+      enrichState: out.length ? 'done' : word.enrichState,
+    });
     toast('已保存', 'success');
     ref.close();
     render();

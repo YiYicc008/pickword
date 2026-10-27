@@ -7,9 +7,26 @@ const POS_ABBR = {
   'auxiliary verb': 'aux.', article: 'art.', particle: 'part.', phrase: 'phr.',
 };
 
+/** 词典的完整词性 → 缩写；用户手填的缩写/中文原样返回 */
 export function posAbbr(tag) {
-  const t = String(tag || '').toLowerCase().trim();
-  return POS_ABBR[t] || (t ? `${t.slice(0, 3)}.` : '');
+  const t = String(tag || '').trim();
+  if (!t) return '';
+  const lower = t.toLowerCase();
+  if (POS_ABBR[lower]) return POS_ABBR[lower];
+  if (/^[a-z]+\.?$/i.test(t)) return `${lower.replace(/\.+$/, '')}.`;
+  return t;
+}
+
+/** 用户输入的缩写/中文 → 存储用的词性标签（认不出来就原样存） */
+export function posTag(input) {
+  const t = String(input || '').trim();
+  if (!t) return '';
+  const lower = t.toLowerCase();
+  const withDot = lower.endsWith('.') ? lower : `${lower}.`;
+  for (const [tag, abbr] of Object.entries(POS_ABBR)) {
+    if (abbr === withDot || tag === lower) return tag;
+  }
+  return t;
 }
 
 export function posClass(abbr) {
