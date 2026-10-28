@@ -494,6 +494,10 @@ Issue 与 PR 均欢迎。提交前请留意三项约定：
 | `?demo&modal=settings` / `sync` / `about` | 直接打开设置 / 云同步 / 关于 |
 | `?demo&modal=manager` | 直接打开「词团与词云」管理器 |
 
+## 更新日志
+
+各版本的软件改动见 [CHANGELOG.md](CHANGELOG.md)；当前版本为 1.1.0.0。
+
 ## 许可证
 
 [MIT](LICENSE)
