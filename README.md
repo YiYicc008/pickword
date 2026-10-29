@@ -393,6 +393,8 @@
 ```
 English Dictionary/
 ├── index.html              应用外壳
+├── health.html             自检页（浏览器环境、脚本、存储、缓存、文件可达性）
+├── 404.html                站内地址错误时的提示页
 ├── manifest.webmanifest    PWA 清单（名称、图标、独立窗口）
 ├── sw.js                   离线缓存（应用外壳，网络优先）
 ├── start.bat               Windows 一键启动（优先使用 Node，回退 Python）
@@ -451,6 +453,11 @@ git revert <commit>        # 撤销指定提交
 **点击喇叭无声音**
 发音使用浏览器内置语音合成或词典音频。iPad 需在系统设置中允许 Safari 播放声音；
 台式机未安装英文语音包时，将回退至词典音频。
+
+**页面打不开或一片空白**
+先打开同一站点下的 `health.html`（例如 `…/pickword/health.html`），它会逐项检查浏览器环境、
+脚本语法、本地存储、缓存与文件是否可取到，并给出结论；页面上还有「清除缓存与 Service Worker」
+按钮。若这一页也打不开，说明是网络层面无法访问该地址。
 
 **手机无法打开电脑地址**
 请确认两台设备连接同一 WiFi；Windows 防火墙首次会询问，选择「允许访问」。

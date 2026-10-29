@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f6f2ea">
+<title>检查 · 拾词</title>
+<style>
+  :root {
+    --paper: #f6f2ea; --surface: #fffdf8; --line: #e3dbcd; --ink: #201d19;
+    --ink-2: #57514a; --ink-3: #8b8377; --accent: #b8452f; --ok: #3f7d5a; --bad: #b8452f;
+    --warn: #c98a2e;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 18px 16px 40px; background: var(--paper); color: var(--ink);
+    font: 15px/1.65 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    -webkit-text-size-adjust: 100%;
+  }
+  h1 { font-size: 19px; margin: 0 0 4px; }
+  .sub { color: var(--ink-3); font-size: 13px; margin: 0 0 16px; }
+  .card {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
+    padding: 12px 14px; margin: 0 0 12px;
+  }
+  .row { display: flex; gap: 10px; padding: 6px 0; border-bottom: 1px dashed var(--line); font-size: 14px; }
+  .row:last-child { border-bottom: 0; }
+  .k { flex: 0 0 108px; color: var(--ink-3); }
+  .v { flex: 1; min-width: 0; word-break: break-all; }
+  .ok { color: var(--ok); font-weight: 600; }
+  .bad { color: var(--bad); font-weight: 600; }
+  .warn { color: var(--warn); font-weight: 600; }
+  .verdict { margin: 14px 0 0; padding: 12px 14px; border-radius: 14px; background: #fff6e8; border: 1px solid #f0d9b0; font-size: 14px; }
+  .verdict b { display: block; margin-bottom: 4px; }
+  .btns { display: flex; gap: 10px; margin: 16px 0 0; flex-wrap: wrap; }
+  button, a.btn {
+    appearance: none; border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+    padding: 10px 16px; border-radius: 10px; font-size: 14px; text-decoration: none;
+    display: inline-block; cursor: pointer;
+  }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
+  .hint { color: var(--ink-3); font-size: 12.5px; margin-top: 10px; }
+</style>
+</head>
+<body>
+
+<h1>打开检查</h1>
+<p class="sub">如果主页面打不开或一片空白，先看这一页的结论。</p>
+
+<div class="card" id="rows">
+  <div class="row"><div class="k">状态</div><div class="v" id="v-status">检测中…</div></div>
+</div>
+
+<div class="verdict" id="verdict" hidden></div>
+
+<div class="btns">
+  <button class="primary" id="btn-clear">清除缓存与 Service Worker</button>
+  <button id="btn-reload">重新加载应用</button>
+  <a class="btn" href="./index.html">返回应用</a>
+</div>
+
+<p class="hint">
+  本页不依赖任何脚本文件、也不注册 Service Worker，因此即使主页面坏了，这一页仍能显示。
+</p>
+
+<script>
+(function () {
+  var rows = document.getElementById('rows');
+  var results = {};
+
+  function add(key, value, state) {
+    var row = document.createElement('div');
+    row.className = 'row';
+    var k = document.createElement('div');
+    k.className = 'k';
+    k.textContent = key;
+    var v = document.createElement('div');
+    v.className = 'v' + (state ? ' ' + state : '');
+    v.innerHTML = value;
+    row.appendChild(k);
+    row.appendChild(v);
+    rows.appendChild(row);
+  }
+
+  function esc(s) {
+    return String(s).replace(/[&<>"]/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+    });
+  }
+
+  function supports(fn) {
+    try { new Function(fn); return true; } catch (e) { return false; }
+  }
+
+  function cssSupport(prop, value) {
+    try {
+      return window.CSS && CSS.supports ? CSS.supports(prop, value) : null;
+    } catch (e) { return null; }
+  }
+
+  // 1. 基本环境
+  var ua = navigator.userAgent || '';
+  results.ua = ua;
+  add('浏览器', esc(ua));
+  add('视口', window.innerWidth + ' × ' + window.innerHeight + '，像素比 ' +
+    (window.devicePixelRatio || 1));
+  var conn = navigator.connection || {};
+  add('网络', (navigator.onLine ? '在线' : '<span class="bad">离线</span>') +
+    (conn.effectiveType ? '，' + esc(conn.effectiveType) : ''));
+
+  // 2. 语法支持（决定能不能跑起来）
+  var modern = supports('var a = { b: 1 }; return a?.b');
+  var nullish = supports('var a = null; return a ?? 1');
+  var clone = typeof window.structuredClone === 'function';
+  var dvh = cssSupport('height', '100dvh');
+  results.modern = modern;
+  add('可选链 ?.', modern ? '<span class="ok">支持</span>' : '<span class="bad">不支持</span>');
+  add('空值合并 ??', nullish ? '<span class="ok">支持</span>' : '<span class="bad">不支持</span>');
+  add('structuredClone', clone ? '<span class="ok">支持</span>' : '<span class="warn">不支持（有兜底，不影响）</span>');
+  add('CSS 100dvh', dvh === null ? '未知' : (dvh ? '<span class="ok">支持</span>' : '<span class="warn">不支持（有兜底）</span>'));
+
+  // 3. 本地存储
+  var store = 'unknown';
+  try {
+    var probe = '__vn_probe__';
+    window.localStorage.setItem(probe, '1');
+    window.localStorage.removeItem(probe);
+    store = 'ok';
+  } catch (e) {
+    store = 'fail';
+  }
+  results.store = store;
+  add('本地存储', store === 'ok'
+    ? '<span class="ok">可读写</span>'
+    : '<span class="bad">不可用</span>（无痕模式或浏览器禁用了网站数据，这一模式下的改动不会保存）');
+
+  // 4. Service Worker 与缓存
+  var swSupported = 'serviceWorker' in navigator;
+  results.swSupported = swSupported;
+  add('Service Worker', swSupported ? '<span class="ok">浏览器支持</span>' : '<span class="bad">浏览器不支持</span>');
+
+  function showSw() {
+    if (!swSupported) return null;
+    var ctl = navigator.serviceWorker.controller;
+    results.swCtrl = !!ctl;
+    add('当前由 SW 接管', ctl ? '<span class="warn">是（旧缓存可能仍在生效）</span>' : '<span class="ok">否</span>');
+    return navigator.serviceWorker.getRegistrations().then(function (list) {
+      results.swCount = list.length;
+      add('已注册 SW', list.length
+        ? '<span class="warn">' + list.length + ' 个：' + list.map(function (r) {
+            return esc(r.scope);
+          }).join('，') + '</span>'
+        : '<span class="ok">0 个</span>');
+    }).catch(function (e) {
+      results.swCount = 0;
+      add('已注册 SW', '<span class="warn">读取失败：' + esc(e && e.message) + '</span>');
+    });
+    if (window.caches && caches.keys) {
+      caches.keys().then(function (keys) {
+        add('缓存', keys.length
+          ? '<span class="warn">' + keys.length + ' 个：' + keys.map(esc).join('，') + '</span>'
+          : '<span class="ok">0 个</span>');
+      }).catch(function () {});
+    }
+  }
+  results.swPending = showSw();
+
+  // 5. 能否取到文件
+  function fetchCheck(label, url, done) {
+    var t0 = Date.now();
+    var opts = { cache: 'no-store' };
+    fetch(url, opts).then(function (res) {
+      var ms = Date.now() - t0;
+      add(label, (res.ok ? '<span class="ok">' : '<span class="bad">') +
+        'HTTP ' + res.status + '</span>，' + ms + ' ms');
+      done(res.ok);
+    }).catch(function (e) {
+      add(label, '<span class="bad">请求失败</span>：' + esc(e && e.message || e));
+      done(false);
+    });
+  }
+
+  var jobs = [];
+  jobs.push(new Promise(function (resolve) {
+    fetchCheck('读取首页', './index.html', function (ok) { results.home = ok; resolve(); });
+  }));
+  jobs.push(new Promise(function (resolve) {
+    fetchCheck('读取词库脚本', './js/app.js', function (ok) { results.js = ok; resolve(); });
+  }));
+  if (results.swPending) jobs.push(results.swPending);
+  Promise.all(jobs).then(verdict);
+
+  // 6. 结论
+  function verdict() {
+    var box = document.getElementById('verdict');
+    var lines = [];
+    var bad = [];
+
+    if (results.home === false) {
+      lines.push('连首页文件都取不到：这是网络层的问题，不是应用本身。');
+      lines.push('可以换用手机浏览器（不要用微信、QQ 内置浏览器）重试；' +
+        '或切换到 Wi-Fi / 换一个网络；也可以把网址复制到 Chrome、Safari、Edge 里打开。');
+      bad.push('network');
+    } else if (results.modern === false) {
+      lines.push('能取到文件，但浏览器版本过低：代码用到的语法（?., ??）解析不了，页面会停在空白。');
+      lines.push('请升级浏览器或换用系统自带浏览器的最新版本（iOS 需 13.4 以上，Android 需 Chrome 80 以上）。');
+      bad.push('browser');
+    } else if (results.store === 'fail') {
+      lines.push('文件与语法都正常，但浏览器禁止保存数据（多半是无痕/隐私模式）。');
+      lines.push('退出无痕模式后重新打开即可。');
+      bad.push('storage');
+    } else if ((results.swCount || 0) > 0 || results.swCtrl) {
+      lines.push('文件、语法、存储都正常，但本站存在 Service Worker 缓存。');
+      lines.push('若主页面仍然空白，多半是旧缓存里的文件坏了：点下面的「清除缓存与 Service Worker」，然后重新打开应用。');
+      bad.push('sw');
+    } else {
+      lines.push('文件、语法、存储与缓存都正常，正常情况下这一页能打开、主页面也能打开。');
+      lines.push('如果主页面依旧空白，请把上面这段浏览器信息截图发给我，以便进一步定位。');
+      bad.push('unknown');
+    }
+
+    if (bad.indexOf('network') < 0 && results.modern === false) {
+      // 已在上面覆盖
+    }
+
+    var status = document.getElementById('v-status');
+    if (status) {
+      var good = bad.length === 1 && (bad[0] === 'sw' || bad[0] === 'unknown');
+      status.innerHTML = good ? '<span class="ok">应用本身正常</span>' : '<span class="bad">需要处理</span>';
+    }
+    box.innerHTML = '<b>结论</b>' + lines.map(function (t) {
+      return '<div>' + t + '</div>';
+    }).join('');
+    box.hidden = false;
+  }
+
+  // 7. 动作
+  document.getElementById('btn-clear').addEventListener('click', function () {
+    var btn = this;
+    btn.disabled = true;
+    btn.textContent = '清理中…';
+    var jobs = [];
+    if (window.caches && caches.keys) {
+      jobs.push(caches.keys().then(function (keys) {
+        return Promise.all(keys.map(function (k) { return caches.delete(k); }));
+      }).catch(function () {}));
+    }
+    if ('serviceWorker' in navigator) {
+      jobs.push(navigator.serviceWorker.getRegistrations().then(function (list) {
+        return Promise.all(list.map(function (r) { return r.unregister(); }));
+      }).catch(function () {}));
+    }
+    Promise.all(jobs).then(function () {
+      btn.textContent = '已清理，请重新打开应用';
+      window.setTimeout(function () {
+        location.href = './index.html';
+      }, 600);
+    });
+  });
+
+  document.getElementById('btn-reload').addEventListener('click', function () {
+    location.href = './index.html?t=' + Date.now();
+  });
+})();
+</script>
+</body>
+</html>

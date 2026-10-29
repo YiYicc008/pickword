@@ -172,8 +172,18 @@ function registerSW() {
   });
 }
 
+function start() {
+  try {
+    boot();
+    window.__vnBooted = true;
+  } catch (err) {
+    console.error('[boot] 启动失败', err);
+    if (window.__vnShowBootFail) window.__vnShowBootFail(err && err.message);
+  }
+}
+
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', boot);
+  document.addEventListener('DOMContentLoaded', start);
 } else {
-  boot();
+  start();
 }

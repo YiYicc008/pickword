@@ -1,9 +1,11 @@
-/* 离线缓存：应用外壳缓存优先，导航请求走网络优先 + 离线兜底 */
+/* 离线缓存：静态资源网络优先 + 离线兜底，导航请求同上 */
 
-const VERSION = 'vn-v5';
+const VERSION = 'vn-v6';
 const CORE = [
   './',
   './index.html',
+  './health.html',
+  './404.html',
   './manifest.webmanifest',
   './css/app.css',
   './css/cloudview.css',

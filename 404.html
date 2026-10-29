@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f6f2ea">
+<title>页面不存在 · 拾词</title>
+<style>
+  :root {
+    --paper: #f6f2ea; --surface: #fffdf8; --line: #e3dbcd; --ink: #201d19;
+    --ink-2: #57514a; --ink-3: #8b8377; --accent: #b8452f;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; padding: 32px 20px;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--paper); color: var(--ink);
+    font: 15px/1.7 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    -webkit-text-size-adjust: 100%;
+  }
+  .box {
+    width: 100%; max-width: 420px; padding: 24px 24px 20px;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 16px;
+    box-shadow: 0 10px 30px -18px rgba(32, 29, 25, .3);
+  }
+  h1 { margin: 0 0 10px; font-size: 20px; font-weight: 600; }
+  p { margin: 0 0 12px; color: var(--ink-2); font-size: 14px; }
+  .url { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; word-break: break-all; color: var(--ink-3); }
+  .btns { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
+  a.btn {
+    display: inline-block; padding: 10px 16px; border-radius: 10px; font-size: 14px;
+    text-decoration: none; border: 1px solid var(--line); color: var(--ink); background: var(--surface);
+  }
+  a.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .tip { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--line); color: var(--ink-3); font-size: 12.5px; }
+</style>
+</head>
+<body>
+<div class="box">
+  <h1>这个地址没有对应的页面</h1>
+  <p>可能是地址拼写有误。请注意大小写：本站路径为全小写的 <span class="url">/pickword/</span>。</p>
+  <p>你访问的地址：<br><span class="url" id="here">—</span></p>
+  <div class="btns">
+    <a class="btn primary" href="./index.html">打开应用</a>
+    <a class="btn" href="./health.html">打开检查页</a>
+  </div>
+  <p class="tip">正确地址：<span class="url">https://YiYicc008.github.io/pickword/index.html</span></p>
+</div>
+<script>
+document.getElementById('here').textContent = location.href;
+</script>
+</body>
+</html>

@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="拾词">
 <meta name="description" content="电子英语单词本：多词本、权重统计、词云关系图、多设备同步。纯前端网页应用，零依赖、离线可用。">
-<meta name="application-version" content="1.1.0.0">
+<meta name="application-version" content="1.1.0.1">
 <title>拾词 · 电子英语单词本</title>
 <meta property="og:type" content="website">
 <meta property="og:title" content="拾词 · 电子英语单词本">
@@ -64,6 +64,54 @@
 <noscript>
   <p style="padding:24px;font-family:sans-serif">这个单词本应用需要启用 JavaScript。</p>
 </noscript>
+
+<div class="boot-fail" id="boot-fail" hidden>
+  <div class="boot-fail-box">
+    <h2>页面没有启动</h2>
+    <p id="boot-fail-why">可能是网络被拦截、浏览器版本过低，或旧缓存仍在生效。</p>
+    <p class="boot-fail-ua" id="boot-fail-ua"></p>
+    <p class="boot-fail-links">
+      <a href="./health.html">打开「检查」页</a>
+      <span>·</span>
+      <a href="./index.html" id="boot-fail-reload">重新加载</a>
+    </p>
+  </div>
+</div>
+
+<script>
+/* 启动自检：不依赖任何外部脚本，主脚本没跑起来时也能显示 */
+(function () {
+  window.__vnBooted = false;
+
+  function show(why) {
+    var box = document.getElementById('boot-fail');
+    if (!box || !box.hidden) return;
+    if (why) {
+      var el = document.getElementById('boot-fail-why');
+      if (el) el.textContent = why;
+    }
+    var ua = document.getElementById('boot-fail-ua');
+    if (ua) ua.textContent = String(navigator.userAgent).slice(0, 220);
+    box.hidden = false;
+  }
+  window.__vnShowBootFail = show;
+
+  window.setTimeout(function () {
+    if (!window.__vnBooted) show();
+  }, 5000);
+
+  /* 模块脚本加载失败或顶层抛错时，第一时间给出提示 */
+  window.addEventListener('error', function (e) {
+    if (window.__vnBooted) return;
+    var target = e && e.target;
+    if (target && (target.tagName === 'SCRIPT' || target.tagName === 'LINK')) {
+      show('页面脚本没有加载成功，可能是网络被拦截或文件不完整。');
+    } else if (e && e.message) {
+      show('页面脚本出错：' + e.message);
+    }
+  }, true);
+})();
+</script>
 
 <script type="module" src="js/app.js"></script>
 </body>

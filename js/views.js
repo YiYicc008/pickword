@@ -1541,7 +1541,7 @@ export function openAboutDialog() {
   const books = getBooks();
   const canSeed = books.length === 1 && getEntriesOfBook(books[0].id).length === 0;
   const foot = el('div', { style: 'display:flex;gap:9px;align-items:center;width:100%' });
-  foot.appendChild(el('span', { style: 'font-size:11.5px;color:var(--ink-3);flex:1', text: 'v1.1.0.0 · 本地优先 · 离线可用' }));
+  foot.appendChild(el('span', { style: 'font-size:11.5px;color:var(--ink-3);flex:1', text: 'v1.1.0.1 · 本地优先 · 离线可用' }));
   if (canSeed) {
     const demoBtn = el('button', { class: 'btn btn-quiet', text: '载入示例数据' });
     demoBtn.addEventListener('click', async () => {
