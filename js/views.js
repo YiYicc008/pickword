@@ -1147,7 +1147,31 @@ function openPasteImport() {
   });
 }
 
+/* 主面板（设置 / 云服务 / 云同步 / 云盘同步 / 关于）同一时间只保留一个，
+   避免在手机上点开一个再点另一个时层层叠加。 */
+let activePanel = null;
+
+function closeActivePanel() {
+  const p = activePanel;
+  activePanel = null;
+  if (p) {
+    try { p.close(); } catch (e) { /* 已关闭 */ }
+  }
+}
+
+function trackPanel(ref) {
+  activePanel = ref;
+  const origClose = ref.close;
+  ref.close = function patchedClose(...args) {
+    if (activePanel === ref) activePanel = null;
+    return origClose.apply(ref, args);
+  };
+  return ref;
+}
+
 export function openSettingsDialog() {
+  closeActivePanel();
+  closeSidebar();
   const s = getSettings();
   const body = el('div', {});
 
@@ -1221,39 +1245,103 @@ export function openSettingsDialog() {
   dictSec.appendChild(rateRow);
   body.appendChild(dictSec);
 
-  /* 数据 */
-  const dataSec = el('div', { class: 'settings-section' });
-  dataSec.appendChild(el('h3', { text: '数据' }));
-  dataSec.appendChild(el('p', { text: '所有数据默认保存在本机浏览器中。建议定期导出备份。' }));
+  /* 云服务入口 */
+  const hintSec = el('div', { class: 'settings-section' });
+  hintSec.appendChild(el('h3', { text: '云服务与数据' }));
+  hintSec.appendChild(el('p', {
+    text: '云同步、云盘备份、数据导入导出与局域网直传已移至左侧边栏的「云服务」。',
+  }));
+  const goCloudBtn = el('button', { class: 'btn btn-quiet' });
+  goCloudBtn.innerHTML = icon('cloud', 15) + '<span>打开云服务</span>';
+  goCloudBtn.addEventListener('click', () => { ref.close(); openCloudDialog(); });
+  hintSec.appendChild(goCloudBtn);
+  body.appendChild(hintSec);
+
+  const foot = el('div', { style: 'display:flex;gap:9px;width:100%;justify-content:flex-end' });
+  const close = el('button', { class: 'btn btn-primary', text: '完成' });
+  close.addEventListener('click', () => {
+    updateSettings({
+      aiProvider: providerSel.value,
+      aiBaseUrl: baseInput.value.trim(),
+      aiModel: modelInput.value.trim(),
+      aiKey: keyInput.value.trim(),
+    });
+    ref.close();
+    render();
+  });
+  foot.appendChild(close);
+
+  const ref = trackPanel(openModal({ title: '设置', body, footer: foot, wide: true }));
+}
+
+/* ==================== 同步 ==================== */
+
+/* ==================== 云服务 ==================== */
+
+/** 云服务面板：云同步 / 云盘备份 / 数据备份 / 局域网直传 的入口与状态 */
+export function openCloudDialog() {
+  closeActivePanel();
+  closeSidebar();
+
+  const body = el('div', {});
+
+  const section = (title, desc) => {
+    const sec = el('div', { class: 'settings-section' });
+    sec.appendChild(el('h3', { text: title }));
+    if (desc) sec.appendChild(el('p', { text: desc }));
+    return sec;
+  };
+
+  const statusLine = (text) => el('p', { class: 'cloud-status', text });
+
+  /* 云盘同步（GitHub Gist） */
+  const g = gistState();
+  const gistSec = section(
+    '云盘同步（GitHub Gist）',
+    '数据存放在你自己 GitHub 账号下的私有 Gist 里，不需要另建数据库；token 只保存在本机浏览器。',
+  );
+  gistSec.appendChild(statusLine(g.connected
+    ? `已连接：@${g.login || 'GitHub'}　${g.lastSyncAt ? `上次同步：${relativeTime(g.lastSyncAt)}` : '尚未同步'}`
+    : '未连接。连接后可在多台设备之间同步全部单词本。'));
+  const gistBtn = el('button', { class: 'btn btn-primary' });
+  gistBtn.innerHTML = icon('cloud', 15) + '<span>打开云盘同步</span>';
+  gistBtn.addEventListener('click', () => { ref.close(); openGistDialog(); });
+  gistSec.appendChild(gistBtn);
+  body.appendChild(gistSec);
+
+  /* 云同步（Supabase，自建项目） */
+  const a = authSummary();
+  const cfg = syncConfig();
+  const supaSec = section(
+    '云同步（Supabase）',
+    '使用你自己创建的 Supabase 项目，可按账号同步；免注册模式只在本设备生效。',
+  );
+  supaSec.appendChild(statusLine(a
+    ? `已登录：${a.anon ? '匿名账号（仅本设备）' : a.email}　${a.lastSyncAt ? `上次同步：${relativeTime(a.lastSyncAt)}` : '尚未同步'}`
+    : (cfg.ready ? '已填写项目地址与密钥，尚未登录。' : '未配置。需要先用你自己的 Supabase 项目建立数据表。')));
+  const supaBtn = el('button', { class: 'btn btn-quiet' });
+  supaBtn.innerHTML = icon('sync', 15) + '<span>打开云同步</span>';
+  supaBtn.addEventListener('click', () => { ref.close(); openSyncDialog(); });
+  supaSec.appendChild(supaBtn);
+  body.appendChild(supaSec);
+
+  /* 数据备份 */
+  const dataSec = section('数据备份', '所有数据默认保存在本机浏览器中。建议定期导出备份，或传到另一台设备。');
 
   const dataRow = el('div', { style: 'display:flex;gap:8px;flex-wrap:wrap' });
+
   const expBtn = el('button', { class: 'btn btn-quiet' });
   expBtn.innerHTML = icon('download', 15) + '<span>导出备份</span>';
   expBtn.addEventListener('click', () => {
     const blob = new Blob([exportJSON()], { type: 'application/json' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `拾词备份_${new Date().toISOString().slice(0, 10)}.json`;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `拾词备份_${new Date().toISOString().slice(0, 10)}.json`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(link.href), 2000);
     toast('已导出', 'success');
   });
 
-  const impBtn = el('button', { class: 'btn btn-quiet' });
-  impBtn.innerHTML = icon('upload', 15) + '<span>导入备份</span>';
-  const fileInput = el('input', { type: 'file', accept: '.json,application/json', style: 'display:none' });
-  impBtn.addEventListener('click', () => fileInput.click());
-  fileInput.addEventListener('change', async () => {
-    const f = fileInput.files?.[0];
-    if (!f) return;
-    try {
-      const text = await f.text();
-      importJSON(text, 'merge');
-      toast('导入完成', 'success');
-      render();
-    } catch (e) { toast(`导入失败：${e.message}`, 'error'); }
-    fileInput.value = '';
-  });
   const copyBtn = el('button', { class: 'btn btn-quiet' });
   copyBtn.innerHTML = icon('copy', 15) + '<span>复制备份</span>';
   copyBtn.addEventListener('click', async () => {
@@ -1289,6 +1377,22 @@ export function openSettingsDialog() {
     }
   });
 
+  const impBtn = el('button', { class: 'btn btn-quiet' });
+  impBtn.innerHTML = icon('upload', 15) + '<span>导入备份</span>';
+  const fileInput = el('input', { type: 'file', accept: '.json,application/json', style: 'display:none' });
+  impBtn.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', async () => {
+    const f = fileInput.files?.[0];
+    if (!f) return;
+    try {
+      const text = await f.text();
+      importJSON(text, 'merge');
+      toast('导入完成', 'success');
+      render();
+    } catch (e) { toast(`导入失败：${e.message}`, 'error'); }
+    fileInput.value = '';
+  });
+
   const pasteBtn = el('button', { class: 'btn btn-quiet' });
   pasteBtn.innerHTML = icon('upload', 15) + '<span>粘贴导入</span>';
   pasteBtn.addEventListener('click', () => openPasteImport());
@@ -1298,57 +1402,29 @@ export function openSettingsDialog() {
   body.appendChild(dataSec);
 
   /* 局域网直传 */
-  const xferSec = el('div', { class: 'settings-section' });
-  xferSec.appendChild(el('h3', { text: '局域网直传' }));
-  xferSec.appendChild(el('p', {
-    text: '免账号：两台设备互换两段配对串，数据直接点对点传输，不经过服务器。适合「换手机」或「把手机上的词搬到电脑」。',
-  }));
+  const xferSec = section(
+    '局域网直传',
+    '免账号：两台设备互换两段配对串，数据直接点对点传输，不经过服务器。适合「换手机」或「把手机上的词搬到电脑」。',
+  );
   const xferBtn = el('button', { class: 'btn btn-quiet' });
   xferBtn.innerHTML = icon('wifi', 15) + '<span>开始直传</span>';
   xferBtn.addEventListener('click', () => { ref.close(); openTransferDialog(); });
   xferSec.appendChild(xferBtn);
   body.appendChild(xferSec);
 
-  /* 同步 */
-  const syncSec = el('div', { class: 'settings-section' });
-  syncSec.appendChild(el('h3', { text: '云同步' }));
-  syncSec.appendChild(el('p', { text: '配置 Supabase 后，可在多台设备上登录同一个账号并同步数据。' }));
-  const syncBtn = el('button', { class: 'btn btn-quiet' });
-  syncBtn.innerHTML = icon('sync', 15) + '<span>配置云同步</span>';
-  syncBtn.addEventListener('click', () => { ref.close(); openSyncDialog(); });
-  syncSec.appendChild(syncBtn);
-  body.appendChild(syncSec);
-
-  /* 云盘同步（GitHub Gist） */
-  const gistSec = el('div', { class: 'settings-section' });
-  gistSec.appendChild(el('h3', { text: '云盘同步（GitHub Gist）' }));
-  gistSec.appendChild(el('p', {
-    text: '数据保存在你自己 GitHub 账号下的私有 Gist 里，不需要另建数据库；token 只保存在本机。',
-  }));
-  const gistBtn = el('button', { class: 'btn btn-quiet' });
-  gistBtn.innerHTML = icon('cloud', 15) + '<span>打开云盘同步</span>';
-  gistBtn.addEventListener('click', () => { ref.close(); openGistDialog(); });
-  gistSec.appendChild(gistBtn);
-  body.appendChild(gistSec);
-
   const foot = el('div', { style: 'display:flex;gap:9px;width:100%;justify-content:flex-end' });
-  const close = el('button', { class: 'btn btn-primary', text: '完成' });
-  close.addEventListener('click', () => {
-    updateSettings({
-      aiProvider: providerSel.value,
-      aiBaseUrl: baseInput.value.trim(),
-      aiModel: modelInput.value.trim(),
-      aiKey: keyInput.value.trim(),
-    });
-    ref.close();
-    render();
-  });
-  foot.appendChild(close);
+  const done = el('button', { class: 'btn btn-primary', text: '完成' });
+  done.addEventListener('click', () => ref.close());
+  foot.appendChild(done);
 
-  const ref = openModal({ title: '设置', body, footer: foot, wide: true });
+  const ref = trackPanel(openModal({
+    title: '云服务',
+    subtitle: '同步、备份与数据搬运',
+    body,
+    footer: foot,
+    wide: true,
+  }));
 }
-
-/* ==================== 同步 ==================== */
 
 /* ==================== 局域网直传（免账号 · 点对点） ==================== */
 
@@ -1597,6 +1673,8 @@ export function openTransferDialog() {
 }
 
 export function openSyncDialog() {
+  closeActivePanel();
+  closeSidebar();
   const body = el('div', {});
   let auth = authSummary();
 
@@ -1855,10 +1933,12 @@ export function openSyncDialog() {
   foot.appendChild(close);
 
   refreshAuth();
-  const ref = openModal({ title: '云同步', subtitle: '多台设备共用一份单词本', body, footer: foot, wide: true });
+  const ref = trackPanel(openModal({ title: '云同步', subtitle: '多台设备共用一份单词本', body, footer: foot, wide: true }));
   close.addEventListener('click', () => ref.close());
 }
 export function openAboutDialog() {
+  closeActivePanel();
+  closeSidebar();
   const body = el('div', {});
   body.appendChild(el('p', {
     text: '一个在浏览器中运行的电子英语单词本：桌面、平板与手机均可使用。数据默认保存在本机，可离线使用；配置 Supabase 后多台设备共享同一份单词本。',
@@ -1905,7 +1985,7 @@ export function openAboutDialog() {
   const books = getBooks();
   const canSeed = books.length === 1 && getEntriesOfBook(books[0].id).length === 0;
   const foot = el('div', { style: 'display:flex;gap:9px;align-items:center;width:100%' });
-  foot.appendChild(el('span', { style: 'font-size:11.5px;color:var(--ink-3);flex:1', text: 'v1.2.0.0 · 本地优先 · 离线可用' }));
+  foot.appendChild(el('span', { style: 'font-size:11.5px;color:var(--ink-3);flex:1', text: 'v1.2.0.1 · 本地优先 · 离线可用' }));
   if (canSeed) {
     const demoBtn = el('button', { class: 'btn btn-quiet', text: '载入示例数据' });
     demoBtn.addEventListener('click', async () => {
@@ -1931,7 +2011,7 @@ export function openAboutDialog() {
   const ok = el('button', { class: 'btn btn-primary', text: '知道了' });
   foot.appendChild(ok);
 
-  const modal = openModal({ title: '关于「拾词」', body, footer: foot });
+  const modal = trackPanel(openModal({ title: '关于「拾词」', body, footer: foot }));
   ok.addEventListener('click', () => modal.close());
   const close = () => modal.close();
 }
@@ -1997,6 +2077,8 @@ export function renderAfterDataChange() {
 /* ==================== 云盘同步（GitHub Gist） ==================== */
 
 export function openGistDialog() {
+  closeActivePanel();
+  closeSidebar();
   let st = gistState();
 
   const body = el('div', {});
@@ -2161,12 +2243,12 @@ export function openGistDialog() {
 
   paint();
   const closeBtn = el('button', { class: 'btn btn-quiet', text: '关闭' });
-  const ref = openModal({
+  const ref = trackPanel(openModal({
     title: '云盘同步',
     subtitle: 'GitHub Gist · 数据在你自己的账号里',
     body,
     footer: el('div', { style: 'display:flex;gap:8px;margin-left:auto' }, [closeBtn]),
     wide: true,
-  });
+  }));
   closeBtn.addEventListener('click', () => ref.close());
 }

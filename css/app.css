@@ -848,7 +848,7 @@ a { color: var(--accent); }
   align-items: center;
   justify-content: center;
   padding: 24px;
-  z-index: 100;
+  z-index: 400;
   animation: fadeIn .18s var(--ease);
   overscroll-behavior: contain;
 }
@@ -1035,7 +1035,7 @@ a { color: var(--accent); }
   display: flex;
   flex-direction: column;
   gap: 8px;
-  z-index: 300;
+  z-index: 500;
   pointer-events: none;
   align-items: center;
 }
@@ -1064,6 +1064,12 @@ a { color: var(--accent); }
 @keyframes toastOut { to { opacity: 0; transform: translateY(-6px) scale(.97); } }
 
 /* ===================== 设置页 ===================== */
+
+.cloud-status {
+  margin: 0 0 10px;
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
 
 .settings-section { margin-bottom: 26px; }
 .settings-section h3 {

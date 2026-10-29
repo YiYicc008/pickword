@@ -6,7 +6,7 @@ import { $, looksEnglish } from './util.js';
 import { toast } from './ui.js';
 import {
   render, renderSidebar, renderTopbar, renderListOnly, renderAfterDataChange,
-  openSettingsDialog, openSyncDialog, openAboutDialog, openBookDialog, closeSidebar,
+  openSettingsDialog, openSyncDialog, openCloudDialog, openAboutDialog, openBookDialog, closeSidebar,
 } from './views.js';
 import { openAddWordDialog } from './entry.js';
 
@@ -156,7 +156,7 @@ function wire() {
   bind('add-book', 'click', () => openBookDialog());
   bind('add-book-2', 'click', () => openBookDialog());
   bind('btn-settings', 'click', openSettingsDialog);
-  bind('btn-sync', 'click', openSyncDialog);
+  bind('btn-sync', 'click', openCloudDialog);
   bind('btn-about', 'click', openAboutDialog);
   bind('scrim', 'click', closeSidebar);
 

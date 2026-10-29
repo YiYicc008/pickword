@@ -1,6 +1,6 @@
 /* 离线缓存：静态资源网络优先 + 离线兜底，导航请求同上 */
 
-const VERSION = 'vn-v9';
+const VERSION = 'vn-v10';
 const CORE = [
   './',
   './index.html',
