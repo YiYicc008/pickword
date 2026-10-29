@@ -1154,7 +1154,7 @@ export function openSettingsDialog() {
   /* AI */
   const aiSec = el('div', { class: 'settings-section' });
   aiSec.appendChild(el('h3', { text: 'AI 服务' }));
-  aiSec.appendChild(el('p', { text: '用于智能分类、中文释义和词团关系生成。支持 DeepSeek、OpenAI 及任何兼容 OpenAI 格式的接口。' }));
+  aiSec.appendChild(el('p', { text: '用于智能分类、中文释义和词团关系生成。支持 DeepSeek、Moonshot、OpenAI 及任何兼容 OpenAI 格式的接口。' }));
 
   const providerSel = el('select', { class: 'text-input', style: 'margin-bottom:12px' });
   for (const [k, v] of Object.entries(PROVIDERS)) {
