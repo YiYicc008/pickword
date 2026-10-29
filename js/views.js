@@ -19,6 +19,7 @@ import {
 } from './sync.js';
 
 import { posAbbr, posTag, posClass, weightClass, sensesSig } from './format.js';
+import { Transfer } from './p2p.js';
 
 export { posAbbr, weightClass };
 
@@ -1115,6 +1116,35 @@ export function openWordDetail(wordId, bookId) {
 
 /* ==================== 设置 ==================== */
 
+function openPasteImport() {
+  const ta = el('textarea', {
+    class: 'xfer-code',
+    rows: '6',
+    placeholder: '把备份内容整段粘贴到这里（以 { 开头）',
+  });
+  const ok = el('button', { class: 'btn btn-primary', text: '导入' });
+  const cancel = el('button', { class: 'btn btn-quiet', text: '取消' });
+  const m = openModal({
+    title: '粘贴导入',
+    subtitle: '与「导出备份」「复制备份」的内容格式相同',
+    body: ta,
+    footer: el('div', { style: 'display:flex;gap:8px;margin-left:auto' }, [cancel, ok]),
+  });
+  cancel.addEventListener('click', () => m.close());
+  ok.addEventListener('click', () => {
+    const text = ta.value.trim();
+    if (!text) { toast('先粘贴内容', 'error'); return; }
+    try {
+      importJSON(text, 'merge');
+      m.close();
+      toast('导入完成', 'success');
+      render();
+    } catch (e) {
+      toast(`导入失败：${e.message}`, 'error');
+    }
+  });
+}
+
 export function openSettingsDialog() {
   const s = getSettings();
   const body = el('div', {});
@@ -1222,9 +1252,60 @@ export function openSettingsDialog() {
     } catch (e) { toast(`导入失败：${e.message}`, 'error'); }
     fileInput.value = '';
   });
-  dataRow.append(expBtn, impBtn, fileInput);
+  const copyBtn = el('button', { class: 'btn btn-quiet' });
+  copyBtn.innerHTML = icon('copy', 15) + '<span>复制备份</span>';
+  copyBtn.addEventListener('click', async () => {
+    try {
+      await copyToClipboard(exportJSON());
+      toast('备份内容已复制，可粘贴到微信等应用', 'success');
+    } catch (e) { toast(e.message, 'error'); }
+  });
+
+  const shareBtn = el('button', { class: 'btn btn-quiet' });
+  shareBtn.innerHTML = icon('share', 15) + '<span>分享备份</span>';
+  shareBtn.addEventListener('click', async () => {
+    const text = exportJSON();
+    if (!navigator.share) {
+      try {
+        await copyToClipboard(text);
+        toast('当前浏览器不支持分享，已复制到剪贴板', 'success');
+      } catch (e) { toast(e.message, 'error'); }
+      return;
+    }
+    try {
+      const name = `拾词备份_${new Date().toISOString().slice(0, 10)}.json`;
+      const file = new File([text], name, { type: 'application/json' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: '拾词备份' });
+      } else {
+        await navigator.share({ title: '拾词备份', text });
+      }
+      toast('已分享', 'success');
+    } catch (e) {
+      if (e && e.name === 'AbortError') return;
+      toast(`分享失败：${e.message}`, 'error');
+    }
+  });
+
+  const pasteBtn = el('button', { class: 'btn btn-quiet' });
+  pasteBtn.innerHTML = icon('upload', 15) + '<span>粘贴导入</span>';
+  pasteBtn.addEventListener('click', () => openPasteImport());
+
+  dataRow.append(expBtn, copyBtn, shareBtn, impBtn, pasteBtn, fileInput);
   dataSec.appendChild(dataRow);
   body.appendChild(dataSec);
+
+  /* 局域网直传 */
+  const xferSec = el('div', { class: 'settings-section' });
+  xferSec.appendChild(el('h3', { text: '局域网直传' }));
+  xferSec.appendChild(el('p', {
+    text: '免账号：两台设备互换两段配对串，数据直接点对点传输，不经过服务器。适合「换手机」或「把手机上的词搬到电脑」。',
+  }));
+  const xferBtn = el('button', { class: 'btn btn-quiet' });
+  xferBtn.innerHTML = icon('wifi', 15) + '<span>开始直传</span>';
+  xferBtn.addEventListener('click', () => { ref.close(); openTransferDialog(); });
+  xferSec.appendChild(xferBtn);
+  body.appendChild(xferSec);
 
   /* 同步 */
   const syncSec = el('div', { class: 'settings-section' });
@@ -1254,6 +1335,252 @@ export function openSettingsDialog() {
 }
 
 /* ==================== 同步 ==================== */
+
+/* ==================== 局域网直传（免账号 · 点对点） ==================== */
+
+function copyToClipboard(text) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    return navigator.clipboard.writeText(text);
+  }
+  return new Promise((resolve, reject) => {
+    const ta = el('textarea', { style: 'position:fixed;left:-9999px;top:0' });
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+    ta.remove();
+    if (ok) resolve(); else reject(new Error('复制失败，请长按文本框手动复制'));
+  });
+}
+
+function incomingInfo(text) {
+  const data = JSON.parse(text);
+  return {
+    books: (data.books || []).length,
+    words: (data.words || []).length,
+  };
+}
+
+/** 收到数据后询问「合并 / 覆盖」 */
+function applyIncoming(text) {
+  let info;
+  try {
+    info = incomingInfo(text);
+  } catch (e) {
+    toast('收到的数据无法解析，可能是传输中断', 'error');
+    return;
+  }
+  const body = el('div', {},
+    el('p', { class: 'muted', text: `对方共有 ${info.books} 个单词本、${info.words} 个单词。` }),
+    el('ul', { class: 'xfer-tips' },
+      el('li', { text: '合并：按单词本与单词对齐，重复的单词权重取较大值，不删除本机内容。' }),
+      el('li', { text: '覆盖：用对方的数据替换本机全部内容，本机现有数据会丢弃。' }),
+    ),
+  );
+  const mergeBtn = el('button', { class: 'btn btn-primary', text: '合并到本机' });
+  const replaceBtn = el('button', { class: 'btn btn-quiet', text: '覆盖本机' });
+  const cancelBtn = el('button', { class: 'btn btn-quiet', text: '取消' });
+  const ref = openModal({
+    title: '收到数据',
+    subtitle: '选择如何写入本机',
+    body,
+    footer: el('div', { style: 'display:flex;gap:8px;margin-left:auto' }, [cancelBtn, replaceBtn, mergeBtn]),
+  });
+  cancelBtn.addEventListener('click', () => ref.close());
+  const write = (mode) => {
+    try {
+      importJSON(text, mode);
+      ref.close();
+      renderAfterDataChange();
+      toast(mode === 'replace' ? '已覆盖本机数据' : '已合并到本机', 'success');
+    } catch (e) {
+      toast(`写入失败：${e.message}`, 'error');
+    }
+  };
+  mergeBtn.addEventListener('click', () => write('merge'));
+  replaceBtn.addEventListener('click', () => write('replace'));
+}
+
+export function openTransferDialog() {
+  let sender = null;
+  let receiver = null;
+
+  const body = el('div', {});
+  body.appendChild(el('p', {
+    class: 'muted',
+    text: '两台设备都打开同一个网址：一端在「发送」生成配对串，另一端在「接收」粘贴并回传应答串。连接建立后数据在两台设备之间直接传输，不经过任何服务器。',
+  }));
+
+  const makeCodeBox = () => el('textarea', {
+    class: 'xfer-code',
+    rows: '3',
+    readonly: 'readonly',
+    placeholder: '点下面的按钮生成',
+  });
+
+  const makeBar = () => {
+    const bar = el('div', { class: 'xfer-bar' }, el('i', {}));
+    bar.firstChild.style.width = '0%';
+    return bar;
+  };
+
+  const setBar = (bar, pct) => { bar.firstChild.style.width = Math.round(pct * 100) + '%'; };
+
+  /* ---------- 发送 ---------- */
+  const sendCard = el('div', { class: 'xfer-card' });
+  sendCard.appendChild(el('h3', { text: '发送本机数据' }));
+  const sendStatus = el('div', { class: 'xfer-status', text: '第 1 步：生成配对串，发给另一台设备。' });
+  const sendCode = makeCodeBox();
+  const sendGen = el('button', { class: 'btn btn-primary', text: '① 生成配对串' });
+  const sendCopy = el('button', { class: 'btn btn-quiet', text: '复制', disabled: 'disabled' });
+  const sendIn = el('textarea', {
+    class: 'xfer-code',
+    rows: '3',
+    placeholder: '第 2 步：粘贴对方回传的应答串',
+  });
+  const sendGo = el('button', { class: 'btn btn-primary', text: '② 连接并发送', disabled: 'disabled' });
+  const sendBar = makeBar();
+  sendCard.append(
+    sendStatus,
+    sendCode,
+    el('div', { class: 'xfer-actions' }, [sendGen, sendCopy]),
+    sendIn,
+    el('div', { class: 'xfer-actions' }, [sendGo]),
+    sendBar,
+  );
+
+  sendGen.addEventListener('click', async () => {
+    sendGen.disabled = true;
+    try {
+      if (sender) sender.close();
+      sender = new Transfer();
+      const code = await sender.createOffer();
+      sendCode.value = code;
+      sendCopy.disabled = false;
+      sendGo.disabled = false;
+      sendStatus.textContent = '把上面的配对串发给另一台设备（微信、QQ、隔空投送都行），等它生成应答串回传。';
+    } catch (e) {
+      sendStatus.textContent = `生成失败：${e.message}`;
+      sendGen.disabled = false;
+    }
+  });
+
+  sendCopy.addEventListener('click', async () => {
+    try {
+      await copyToClipboard(sendCode.value);
+      toast('配对串已复制', 'success');
+    } catch (e) {
+      sendCode.select();
+      toast(e.message, 'error');
+    }
+  });
+
+  sendGo.addEventListener('click', async () => {
+    const code = sendIn.value.trim();
+    if (!code) { toast('先粘贴对方回传的应答串', 'error'); return; }
+    sendGo.disabled = true;
+    sendStatus.textContent = '正在连接，请让另一台设备保持页面打开…';
+    try {
+      if (!sender) throw new Error('请先点「① 生成配对串」');
+      sender.onProgress = (p) => setBar(sendBar, p * 0.7);
+      await sender.applyAnswer(code);
+      setBar(sendBar, 0.7);
+      sendStatus.textContent = '已连接，正在发送…';
+      await sender.send(exportJSON());
+      setBar(sendBar, 1);
+      sendStatus.textContent = '已发送完成。对方点「合并到本机」后即生效。';
+      toast('已发送', 'success');
+    } catch (e) {
+      sendStatus.textContent = `发送失败：${e.message}`;
+      sendGo.disabled = false;
+    }
+  });
+
+  /* ---------- 接收 ---------- */
+  const recvCard = el('div', { class: 'xfer-card' });
+  recvCard.appendChild(el('h3', { text: '接收另一台设备的数据' }));
+  const recvStatus = el('div', { class: 'xfer-status', text: '第 1 步：粘贴对方发来的配对串。' });
+  const recvIn = el('textarea', { class: 'xfer-code', rows: '3', placeholder: '在这里粘贴对方发来的配对串' });
+  const recvMake = el('button', { class: 'btn btn-primary', text: '① 生成应答串' });
+  const recvCode = makeCodeBox();
+  const recvCopy = el('button', { class: 'btn btn-quiet', text: '复制', disabled: 'disabled' });
+  const recvBar = makeBar();
+  recvCard.append(
+    recvStatus,
+    recvIn,
+    el('div', { class: 'xfer-actions' }, [recvMake]),
+    recvCode,
+    el('div', { class: 'xfer-actions' }, [recvCopy]),
+    recvBar,
+  );
+
+  recvMake.addEventListener('click', async () => {
+    const code = recvIn.value.trim();
+    if (!code) { toast('先粘贴对方的配对串', 'error'); return; }
+    recvMake.disabled = true;
+    try {
+      if (receiver) receiver.close();
+      receiver = new Transfer();
+      receiver.onProgress = (p) => setBar(recvBar, p);
+      receiver.onData = (text) => {
+        setBar(recvBar, 1);
+        recvStatus.textContent = '已收到对方的数据。';
+        applyIncoming(text);
+      };
+      const answer = await receiver.acceptOffer(code);
+      recvCode.value = answer;
+      recvCopy.disabled = false;
+      recvStatus.textContent = '把应答串发回给对方，等它点「② 连接并发送」。保持本页面打开。';
+    } catch (e) {
+      recvStatus.textContent = `生成失败：${e.message}`;
+      recvMake.disabled = false;
+    }
+  });
+
+  recvCopy.addEventListener('click', async () => {
+    try {
+      await copyToClipboard(recvCode.value);
+      toast('应答串已复制', 'success');
+    } catch (e) {
+      recvCode.select();
+      toast(e.message, 'error');
+    }
+  });
+
+  /* ---------- 发送 / 接收 切换 ---------- */
+  const tabSend = el('button', { class: 'xfer-tab on', type: 'button', text: '我要发送' });
+  const tabRecv = el('button', { class: 'xfer-tab', type: 'button', text: '我要接收' });
+  const tabs = el('div', { class: 'xfer-tabs' }, [tabSend, tabRecv]);
+  const showTab = (which) => {
+    const isSend = which === 'send';
+    sendCard.classList.toggle('hidden', !isSend);
+    recvCard.classList.toggle('hidden', isSend);
+    tabSend.classList.toggle('on', isSend);
+    tabRecv.classList.toggle('on', !isSend);
+  };
+  tabSend.addEventListener('click', () => showTab('send'));
+  tabRecv.addEventListener('click', () => showTab('recv'));
+
+  body.append(tabs, sendCard, recvCard);
+  showTab('send');
+
+  const closeBtn = el('button', { class: 'btn btn-quiet', text: '关闭' });
+  const ref = openModal({
+    title: '局域网直传',
+    subtitle: '免账号 · 点对点，数据不经过服务器',
+    body,
+    footer: el('div', { style: 'display:flex;gap:8px;margin-left:auto' }, [closeBtn]),
+    wide: true,
+    onClose: () => {
+      if (sender) sender.close();
+      if (receiver) receiver.close();
+      sender = null;
+      receiver = null;
+    },
+  });
+  closeBtn.addEventListener('click', () => ref.close());
+}
 
 export function openSyncDialog() {
   const body = el('div', {});
@@ -1541,7 +1868,7 @@ export function openAboutDialog() {
   const books = getBooks();
   const canSeed = books.length === 1 && getEntriesOfBook(books[0].id).length === 0;
   const foot = el('div', { style: 'display:flex;gap:9px;align-items:center;width:100%' });
-  foot.appendChild(el('span', { style: 'font-size:11.5px;color:var(--ink-3);flex:1', text: 'v1.1.0.1 · 本地优先 · 离线可用' }));
+  foot.appendChild(el('span', { style: 'font-size:11.5px;color:var(--ink-3);flex:1', text: 'v1.2.0.0 · 本地优先 · 离线可用' }));
   if (canSeed) {
     const demoBtn = el('button', { class: 'btn btn-quiet', text: '载入示例数据' });
     demoBtn.addEventListener('click', async () => {

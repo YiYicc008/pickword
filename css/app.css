@@ -1371,3 +1371,98 @@ a { color: var(--accent); }
 }
 .boot-fail-links { display: flex; gap: 8px; align-items: center; color: var(--ink-3); }
 .boot-fail-links a { color: var(--accent); text-decoration: none; border-bottom: 1px solid currentColor; }
+
+/* 局域网直传 */
+.xfer-card {
+  margin: 14px 0 0;
+  padding: 14px 14px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+}
+.xfer-card h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.xfer-status {
+  margin: 0 0 8px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--ink-2);
+}
+.xfer-tabs {
+  display: flex;
+  gap: 6px;
+  margin: 14px 0 0;
+}
+.xfer-tab {
+  padding: 7px 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--paper);
+  font-size: 13px;
+  color: var(--ink-2);
+  cursor: pointer;
+  transition: all .16s var(--ease);
+}
+.xfer-tab:hover { border-color: var(--line-strong); }
+.xfer-tab.on {
+  background: var(--accent-soft);
+  border-color: transparent;
+  color: var(--accent);
+  font-weight: 600;
+}
+.xfer-code {
+  display: block;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0 0 8px;
+  padding: 10px 12px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--ink-2);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  resize: vertical;
+  word-break: break-all;
+}
+.xfer-code:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: #fff;
+}
+.xfer-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 0 0 10px;
+}
+.xfer-bar {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.xfer-bar > i {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--accent);
+  transition: width .25s var(--ease);
+}
+.xfer-tips {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--ink-3);
+}
+@media (max-width: 760px) {
+  .xfer-card { padding: 12px 12px 10px; }
+}

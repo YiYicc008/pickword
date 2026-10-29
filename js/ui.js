@@ -36,6 +36,11 @@ const P = {
   eye: '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="3"/>',
   keyboard: '<rect x="2.5" y="6" width="19" height="12" rx="2.5"/><path d="M7 10h.01M11 10h.01M15 10h.01M7.5 14h9"/>',
   cloudOff: '<path d="M3 3l18 18"/><path d="M17.5 19a4.5 4.5 0 0 0 .5-8.97 6 6 0 0 0-2.8-4.4"/><path d="M6.2 9.3A4.5 4.5 0 0 0 6.5 19h6"/>',
+  copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M15 6.5V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h.5"/>',
+  share: '<path d="M12 16V4"/><path d="m8 8 4-4 4 4"/><path d="M5 14v5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-5"/>',
+  phone: '<rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18.5h2"/>',
+  desktop: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>',
+  wifi: '<path d="M4.5 9.5a11 11 0 0 1 15 0"/><path d="M7.5 12.8a6.5 6.5 0 0 1 9 0"/><path d="M10.5 16a2.6 2.6 0 0 1 3 0"/><path d="M12 19.2h.01"/>',
 };
 
 export function icon(name, size = 18, extraClass = '') {
