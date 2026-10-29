@@ -20,6 +20,7 @@ import {
 
 import { posAbbr, posTag, posClass, weightClass, sensesSig } from './format.js';
 import { Transfer } from './p2p.js';
+import { gistState, connectGist, disconnectGist, syncGist, pushGist, restoreGist } from './cloud.js';
 
 export { posAbbr, weightClass };
 
@@ -1317,6 +1318,18 @@ export function openSettingsDialog() {
   syncSec.appendChild(syncBtn);
   body.appendChild(syncSec);
 
+  /* 云盘同步（GitHub Gist） */
+  const gistSec = el('div', { class: 'settings-section' });
+  gistSec.appendChild(el('h3', { text: '云盘同步（GitHub Gist）' }));
+  gistSec.appendChild(el('p', {
+    text: '数据保存在你自己 GitHub 账号下的私有 Gist 里，不需要另建数据库；token 只保存在本机。',
+  }));
+  const gistBtn = el('button', { class: 'btn btn-quiet' });
+  gistBtn.innerHTML = icon('cloud', 15) + '<span>打开云盘同步</span>';
+  gistBtn.addEventListener('click', () => { ref.close(); openGistDialog(); });
+  gistSec.appendChild(gistBtn);
+  body.appendChild(gistSec);
+
   const foot = el('div', { style: 'display:flex;gap:9px;width:100%;justify-content:flex-end' });
   const close = el('button', { class: 'btn btn-primary', text: '完成' });
   close.addEventListener('click', () => {
@@ -1868,7 +1881,7 @@ export function openAboutDialog() {
   const books = getBooks();
   const canSeed = books.length === 1 && getEntriesOfBook(books[0].id).length === 0;
   const foot = el('div', { style: 'display:flex;gap:9px;align-items:center;width:100%' });
-  foot.appendChild(el('span', { style: 'font-size:11.5px;color:var(--ink-3);flex:1', text: 'v1.2.0.0 · 本地优先 · 离线可用' }));
+  foot.appendChild(el('span', { style: 'font-size:11.5px;color:var(--ink-3);flex:1', text: 'v1.3.0.0 · 本地优先 · 离线可用' }));
   if (canSeed) {
     const demoBtn = el('button', { class: 'btn btn-quiet', text: '载入示例数据' });
     demoBtn.addEventListener('click', async () => {
@@ -1955,4 +1968,181 @@ export function renderAfterDataChange() {
   if (vs.view === 'list') renderListOnly();
   renderSidebar();
   renderTopbar();
+}
+
+/* ==================== 云盘同步（GitHub Gist） ==================== */
+
+export function openGistDialog() {
+  let st = gistState();
+
+  const body = el('div', {});
+  body.appendChild(el('p', {
+    text: '使用你自己 GitHub 账号下的私有 Gist 保存全部数据：不需要注册应用，也没有第三方服务器。'
+      + 'token 只保存在本机浏览器，权限仅限 gist。',
+  }));
+
+  /* 1. 连接 */
+  const connSec = el('div', { class: 'settings-section' });
+  connSec.appendChild(el('h3', { text: '1 · 连接 GitHub' }));
+  const tokenInput = el('input', {
+    class: 'text-input',
+    type: 'password',
+    autocomplete: 'off',
+    placeholder: 'GitHub token（ghp_… 或 github_pat_…）',
+  });
+  const connRow = el('div', { style: 'display:flex;gap:8px;flex-wrap:wrap;margin-top:10px' });
+  const connBtn = el('button', { class: 'btn btn-primary', text: '连接' });
+  const disconnBtn = el('button', { class: 'btn btn-quiet', text: '断开' });
+  const connNote = el('p', { class: 'muted', text: '' });
+  connRow.append(connBtn, disconnBtn);
+  connSec.append(tokenInput, connRow, connNote);
+  body.appendChild(connSec);
+
+  /* 2. 同步 */
+  const syncSec = el('div', { class: 'settings-section' });
+  syncSec.appendChild(el('h3', { text: '2 · 同步' }));
+  const syncRow = el('div', { style: 'display:flex;gap:8px;flex-wrap:wrap' });
+  const syncBtn = el('button', { class: 'btn btn-primary' });
+  syncBtn.innerHTML = icon('sync', 15) + '<span>立即同步</span>';
+  const pullBtn = el('button', { class: 'btn btn-quiet', text: '从云端恢复' });
+  const pushBtn = el('button', { class: 'btn btn-quiet', text: '上传本机' });
+  const syncNote = el('p', { class: 'muted', text: '' });
+  syncRow.append(syncBtn, pullBtn, pushBtn);
+  syncSec.append(syncRow, syncNote);
+  body.appendChild(syncSec);
+
+  /* 3. 说明 */
+  const helpSec = el('div', { class: 'settings-section' });
+  helpSec.appendChild(el('h3', { text: '3 · 如何生成 token' }));
+  const help = el('div', { class: 'muted' });
+  help.append(
+    el('p', { text: '1. 打开 github.com/settings/tokens → Generate new token (classic)；' }),
+    el('p', { text: '2. Note 可填 pickword，Expiration 自行选择；' }),
+    el('p', { text: '3. 只勾选 gist 一项 → Generate token → 复制以 ghp_ 开头的那串；' }),
+    el('p', { text: '4. 粘贴到上面第 1 段并点「连接」。换设备时粘贴同一个 token 即可。' }),
+  );
+  helpSec.appendChild(help);
+  body.appendChild(helpSec);
+
+  /* ---------------- 状态渲染 ---------------- */
+
+  const fmtTime = (t) => {
+    if (!t) return '尚未同步';
+    const d = new Date(t);
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+
+  const paint = () => {
+    const on = st.connected;
+    tokenInput.style.display = on ? 'none' : '';
+    connBtn.style.display = on ? 'none' : '';
+    disconnBtn.style.display = on ? '' : 'none';
+    connNote.textContent = on
+      ? `已连接：@${st.login || 'GitHub'}${st.gistId ? '' : '（云端还没有备份，首次同步会创建）'}`
+      : 'token 只存在本机浏览器，不会上传到任何地方。';
+    [syncBtn, pullBtn, pushBtn].forEach((b) => { b.disabled = !on; });
+    syncNote.textContent = on ? `上次同步：${fmtTime(st.lastSyncAt)}` : '连接后才能同步。';
+  };
+
+  const busy = (btn, label, fn) => {
+    const old = btn.innerHTML;
+    btn.disabled = true;
+    btn.textContent = label;
+    return Promise.resolve()
+      .then(fn)
+      .finally(() => { btn.disabled = false; btn.innerHTML = old; paint(); });
+  };
+
+  connBtn.addEventListener('click', () => {
+    busy(connBtn, '连接中…', async () => {
+      try {
+        const r = await connectGist(tokenInput.value);
+        st = gistState();
+        tokenInput.value = '';
+        toast(`已连接：@${r.login}`, 'success');
+      } catch (e) {
+        connNote.textContent = e.message;
+        toast(e.message, 'error');
+      }
+    });
+  });
+
+  disconnBtn.addEventListener('click', async () => {
+    const ok = await confirmDialog({
+      title: '断开 GitHub',
+      message: '将清除本机保存的 token。云端的 Gist 不会被删除，重新连接后仍可同步。',
+      confirmText: '断开',
+    });
+    if (!ok) return;
+    disconnectGist();
+    st = gistState();
+    paint();
+    toast('已断开');
+  });
+
+  syncBtn.addEventListener('click', () => {
+    busy(syncBtn, '同步中…', async () => {
+      try {
+        const r = await syncGist();
+        st = gistState();
+        renderAfterDataChange();
+        toast(r.merged ? '已同步（含云端数据）' : '已同步到云端', 'success');
+      } catch (e) {
+        toast(e.message, 'error');
+        syncNote.textContent = e.message;
+      }
+    });
+  });
+
+  pullBtn.addEventListener('click', async () => {
+    const ok = await confirmDialog({
+      title: '从云端恢复',
+      message: '将用云端的备份覆盖本机数据。本机自上次同步之后的改动会丢失，建议先「上传本机」或导出备份。',
+      confirmText: '覆盖本机',
+      danger: true,
+    });
+    if (!ok) return;
+    busy(pullBtn, '读取中…', async () => {
+      try {
+        await restoreGist();
+        st = gistState();
+        renderAfterDataChange();
+        toast('已用云端备份覆盖本机', 'success');
+      } catch (e) {
+        toast(e.message, 'error');
+        syncNote.textContent = e.message;
+      }
+    });
+  });
+
+  pushBtn.addEventListener('click', async () => {
+    const ok = await confirmDialog({
+      title: '上传本机',
+      message: '将用本机当前数据覆盖云端的备份。其它设备下次「从云端恢复」时会拿到这一份。',
+      confirmText: '上传',
+    });
+    if (!ok) return;
+    busy(pushBtn, '上传中…', async () => {
+      try {
+        await pushGist();
+        st = gistState();
+        toast('已上传到云端', 'success');
+      } catch (e) {
+        toast(e.message, 'error');
+        syncNote.textContent = e.message;
+      }
+    });
+  });
+
+  paint();
+  const closeBtn = el('button', { class: 'btn btn-quiet', text: '关闭' });
+  const ref = openModal({
+    title: '云盘同步',
+    subtitle: 'GitHub Gist · 数据在你自己的账号里',
+    body,
+    footer: el('div', { style: 'display:flex;gap:8px;margin-left:auto' }, [closeBtn]),
+    wide: true,
+  });
+  closeBtn.addEventListener('click', () => ref.close());
 }

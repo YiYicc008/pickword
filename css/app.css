@@ -351,6 +351,12 @@ a { color: var(--accent); }
 }
 .btn-ai:hover { filter: brightness(1.07); }
 .btn-ai[disabled] { opacity: .5; cursor: not-allowed; filter: none; }
+.btn[disabled], .btn-sm[disabled], .icon-btn[disabled] {
+  opacity: .45;
+  cursor: not-allowed;
+  box-shadow: none;
+  filter: saturate(.7);
+}
 
 /* 工具栏 */
 .toolbar {
