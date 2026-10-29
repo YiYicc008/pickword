@@ -1,23 +1,64 @@
 {
+  "id": "./",
   "name": "拾词 · 电子英语单词本",
   "short_name": "拾词",
   "description": "多单词本、权重统计、词云关系图的电子英语单词本",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui", "browser"],
   "orientation": "any",
   "background_color": "#f6f2ea",
   "theme_color": "#f6f2ea",
   "lang": "zh-CN",
+  "dir": "ltr",
   "categories": ["education", "productivity"],
+  "prefer_related_applications": false,
   "icons": [
     { "src": "assets/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
     { "src": "assets/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
     { "src": "assets/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
     { "src": "assets/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ],
+  "screenshots": [
+    {
+      "src": "docs/words.png",
+      "sizes": "1440x900",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "单词列表：权重、音标、词性与中文释义"
+    },
+    {
+      "src": "docs/cloud.png",
+      "sizes": "1440x900",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "词云视图：词团与关系连线"
+    },
+    {
+      "src": "docs/mobile.png",
+      "sizes": "390x844",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "手机上的单词列表"
+    }
+  ],
   "shortcuts": [
-    { "name": "新建单词本", "url": "./index.html?action=new-book" },
-    { "name": "词云视图", "url": "./index.html?view=cloud" }
-  ]
+    { "name": "添加单词", "short_name": "添加", "url": "./index.html?action=add-word", "icons": [{ "src": "assets/icon-192.png", "sizes": "192x192" }] },
+    { "name": "新建单词本", "short_name": "新建", "url": "./index.html?action=new-book", "icons": [{ "src": "assets/icon-192.png", "sizes": "192x192" }] },
+    { "name": "词云视图", "short_name": "词云", "url": "./index.html?view=cloud", "icons": [{ "src": "assets/icon-192.png", "sizes": "192x192" }] },
+    { "name": "局域网直传", "short_name": "直传", "url": "./index.html?action=transfer", "icons": [{ "src": "assets/icon-192.png", "sizes": "192x192" }] }
+  ],
+  "share_target": {
+    "action": "./index.html",
+    "method": "GET",
+    "params": { "title": "title", "text": "text", "url": "url" }
+  },
+  "protocol_handlers": [
+    { "protocol": "web+pickword", "url": "./index.html?protocol=add&w=%s" }
+  ],
+  "file_handlers": [
+    { "action": "./index.html", "accept": { "application/json": [".json"] } }
+  ],
+  "launch_handler": { "client_mode": "navigate-existing" }
 }

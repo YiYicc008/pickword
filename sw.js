@@ -1,11 +1,12 @@
 /* 离线缓存：静态资源网络优先 + 离线兜底，导航请求同上 */
 
-const VERSION = 'vn-v8';
+const VERSION = 'vn-v9';
 const CORE = [
   './',
   './index.html',
   './health.html',
   './404.html',
+  './install.html',
   './manifest.webmanifest',
   './css/app.css',
   './css/cloudview.css',
@@ -25,6 +26,7 @@ const CORE = [
   './js/sync.js',
   './js/p2p.js',
   './js/cloud.js',
+  './js/install.js',
   './js/demo.js',
   './assets/icon.svg',
   './assets/icon-180.png',

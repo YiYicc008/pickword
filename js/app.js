@@ -1,8 +1,8 @@
 /* 应用入口 */
 
-import { load, subscribe, getBooks, getBook, getClusters, DEMO_MODE } from './store.js';
+import { load, subscribe, getBooks, getBook, getClusters, importJSON, DEMO_MODE } from './store.js';
 import { vs, selectBook, lastBook } from './viewstate.js';
-import { $ } from './util.js';
+import { $, looksEnglish } from './util.js';
 import { toast } from './ui.js';
 import {
   render, renderSidebar, renderTopbar, renderListOnly, renderAfterDataChange,
@@ -45,12 +45,11 @@ function boot() {
 
   const params = new URLSearchParams(location.search);
   if (params.get('view') === 'cloud') vs.view = 'cloud';
-  const pendingAction = params.get('action');
 
   wire();
   render();
-
-  if (pendingAction === 'new-book') setTimeout(() => openBookDialog(), 120);
+  handleLaunchFiles();
+  handleIncoming(params);
   registerSW();
 
   if (DEMO_MODE) {
@@ -86,6 +85,66 @@ function boot() {
       })
       .catch((e) => console.warn('[demo] 载入失败', e));
   }
+}
+
+/* 从分享文本中取出一个像英文单词的词，作为待添加的单词 */
+function firstTermFrom(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return '';
+  const words = raw.match(/[A-Za-z][A-Za-z'’-]{0,30}/g) || [];
+  const pick = words.find((w) => looksEnglish(w)) || words[0] || '';
+  return pick.toLowerCase();
+}
+
+/* 桌面快捷方式、系统分享、web+pickword 协议带来的入口 */
+function handleIncoming(params) {
+  const action = params.get('action');
+  const viaProtocol = params.get('protocol');
+  const shared = params.get('text') || params.get('title') || '';
+  const term = params.get('w') || (shared ? firstTermFrom(shared) : '');
+
+  if (action === 'new-book') {
+    setTimeout(() => openBookDialog(), 120);
+    return;
+  }
+  if (action === 'transfer') {
+    setTimeout(() => {
+      import('./views.js').then((m) => m.openTransferDialog()).catch((e) => console.warn('[transfer]', e));
+    }, 140);
+    return;
+  }
+  const wantsAdd = action === 'add-word' || viaProtocol === 'add';
+  if (wantsAdd || term) {
+    setTimeout(() => {
+      if (term) openAddWordDialog({ preselectBookId: vs.bookId, initialTerm: term });
+      else openAddWordDialog({ preselectBookId: vs.bookId });
+    }, 140);
+    return;
+  }
+  const view = params.get('view');
+  if (view === 'cloud' && vs.view !== 'cloud') {
+    vs.view = 'cloud';
+    render();
+  }
+}
+
+/* 从桌面双击 .json 备份文件打开时（Chrome 桌面版） */
+function handleLaunchFiles() {
+  if (!('launchQueue' in window) || typeof window.launchQueue.setConsumer !== 'function') return;
+  window.launchQueue.setConsumer(async (launchParams) => {
+    const handle = (launchParams && launchParams.files && launchParams.files[0]) || null;
+    if (!handle) return;
+    try {
+      const file = await handle.getFile();
+      const text = await file.text();
+      importJSON(text, 'merge');
+      renderAfterDataChange();
+      toast('已导入备份：' + handle.name, 'success', 3200);
+    } catch (err) {
+      console.warn('[launch] 导入失败', err);
+      toast('导入失败：文件不是有效的备份', 'error', 3200);
+    }
+  });
 }
 
 function wire() {

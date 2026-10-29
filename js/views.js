@@ -21,6 +21,7 @@ import {
 import { posAbbr, posTag, posClass, weightClass, sensesSig } from './format.js';
 import { Transfer } from './p2p.js';
 import { gistState, connectGist, disconnectGist, syncGist, pushGist, restoreGist } from './cloud.js';
+import { canPromptInstall, promptInstall } from './install.js';
 
 export { posAbbr, weightClass };
 
@@ -1874,14 +1875,37 @@ export function openAboutDialog() {
     item('权重', '首次加入为 1，重复录入自动 +1，直接显示在单词旁'),
     item('AI 分类', '录入时自动判断该归入哪几个单词本'),
     item('词云', '力导向关系图，词团可重叠且视觉可辨'),
-    item('安装', '浏览器里选择「安装到桌面」或「添加到主屏幕」即可离线使用')
+    item('安装', '可装到桌面或主屏幕，独立窗口运行、断网可用')
   );
   body.appendChild(list);
+
+  // 安装入口：能做一键安装时给出按钮，否则引导到安装说明页
+  const installRow = el('div', { style: 'display:flex;gap:8px;flex-wrap:wrap;margin:16px 0 0' });
+  if (canPromptInstall()) {
+    const installBtn = el('button', { class: 'btn btn-quiet', text: '安装到桌面' });
+    installBtn.addEventListener('click', async () => {
+      installBtn.disabled = true;
+      const result = await promptInstall();
+      installBtn.disabled = false;
+      if (result === 'accepted') toast('已开始安装，请按浏览器提示完成', 'success', 3000);
+      else if (result === 'dismissed') toast('已取消安装', 'default', 2000);
+      else toast('当前浏览器不支持一键安装，可参考「安装说明」', 'default', 3200);
+    });
+    installRow.appendChild(installBtn);
+  }
+  installRow.appendChild(el('a', {
+    class: 'btn btn-quiet',
+    href: './install.html',
+    target: '_blank',
+    rel: 'noopener',
+    text: '安装说明（Windows / Android / iPhone / 鸿蒙）',
+  }));
+  body.appendChild(installRow);
 
   const books = getBooks();
   const canSeed = books.length === 1 && getEntriesOfBook(books[0].id).length === 0;
   const foot = el('div', { style: 'display:flex;gap:9px;align-items:center;width:100%' });
-  foot.appendChild(el('span', { style: 'font-size:11.5px;color:var(--ink-3);flex:1', text: 'v1.3.0.0 · 本地优先 · 离线可用' }));
+  foot.appendChild(el('span', { style: 'font-size:11.5px;color:var(--ink-3);flex:1', text: 'v1.4.0.0 · 本地优先 · 离线可用' }));
   if (canSeed) {
     const demoBtn = el('button', { class: 'btn btn-quiet', text: '载入示例数据' });
     demoBtn.addEventListener('click', async () => {
