@@ -574,7 +574,7 @@ Issue 与 PR 均欢迎。提交前请留意三项约定：
 
 ## 更新日志
 
-各版本的软件改动见 [CHANGELOG.md](CHANGELOG.md)；当前版本为 1.1.0.0。
+各版本的软件改动见 [CHANGELOG.md](CHANGELOG.md)；当前版本为 1.2.0.0。
 
 ## 许可证
 
