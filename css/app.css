@@ -1111,6 +1111,13 @@ a { color: var(--accent); }
 }
 .switch.on { background: var(--green); }
 .switch.on::after { transform: translateX(17px); }
+/* 未接入 AI 时：开关保持关闭态，且不响应切换动画 */
+.switch.locked {
+  background: var(--surface-2);
+  cursor: not-allowed;
+}
+.switch.locked::after { transform: none; }
+.switch.locked, .switch.locked::after { transition: none; }
 
 /* ===================== 词云视图 ===================== */
 
@@ -1303,14 +1310,40 @@ a { color: var(--accent); }
   .word-term { font-size: 18px; }
   .meaning-zh { font-size: 13.5px; -webkit-line-clamp: 3; }
 
-  .modal {
-    max-height: 92dvh;
-    border-radius: 24px 24px 0 0;
-    max-width: none;
-    margin-top: auto;
+  /* 手机：弹层做成整屏视图（不再留缝露出背后的列表），高度跟随可视视口，
+     这样软键盘弹出时底部按钮仍在键盘上方 */
+  /* 遮罩铺满整个视口，背后列表既不露出也点不到；
+     即便是键盘高度算偏，多出来的区域也是纯白，不会露出模糊的列表 */
+  .modal-backdrop {
+    padding: 0;
+    display: block;
+    top: 0;
+    bottom: 0;
+    height: auto;
+    background: var(--surface);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
   }
-  .modal-backdrop { padding: 0; align-items: flex-end; }
-  .modal-body { padding: 4px 18px 8px; }
+  /* 整屏弹层：用 fixed + top/bottom 明确定位，底部让出键盘高度，
+     不依赖 flex 拉伸与百分比高度（不同浏览器行为不一致） */
+  .modal {
+    position: fixed;
+    left: 0;
+    right: 0;
+    top: 0;
+    bottom: var(--vvpad, 0px);
+    height: auto;
+    max-height: none;
+    border-radius: 0;
+    max-width: none;
+    margin: 0;
+    animation: none;
+  }
+  .modal-body {
+    padding: 4px 18px 8px;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
   .modal-head { padding: 20px 18px 12px; }
   .modal-foot { padding: 14px 18px calc(16px + env(safe-area-inset-bottom)); }
 
@@ -1477,4 +1510,50 @@ a { color: var(--accent); }
 }
 @media (max-width: 760px) {
   .xfer-card { padding: 12px 12px 10px; }
+}
+
+/* ==================== 拼写检查浮层 ==================== */
+.spell-host { position: relative; height: 0; z-index: 5; pointer-events: none; }
+.spell-host.inline { height: auto; margin: 0 0 18px; pointer-events: auto; }
+.spell-card.float {
+  position: fixed;
+  z-index: 420;
+}
+.spell-card {
+  width: 268px;
+  box-sizing: border-box;
+  padding: 10px 12px 8px;
+  border-radius: 12px;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  box-shadow: 0 16px 36px -14px rgba(32, 29, 25, .34), 0 2px 7px rgba(32, 29, 25, .08);
+  pointer-events: auto;
+}
+.spell-host.inline .spell-card { position: static; width: auto; box-shadow: var(--sh-1); }
+.spell-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 3px; }
+.spell-title { font-size: 12px; color: var(--ink-3); letter-spacing: .02em; }
+.spell-close {
+  border: 0; background: none; padding: 2px 3px; border-radius: 6px;
+  color: var(--ink-3); cursor: pointer; line-height: 1; display: inline-flex;
+}
+.spell-close:hover { background: var(--surface-2); color: var(--ink); }
+.spell-word {
+  display: block; width: 100%; text-align: left;
+  border: 0; background: none; padding: 0;
+  font-family: var(--serif); font-size: 20px; line-height: 1.25;
+  color: var(--accent); cursor: pointer;
+}
+.spell-word:hover { text-decoration: underline; }
+.spell-use { font-size: 11px; color: var(--ink-3); margin: 2px 0 7px; }
+.spell-phon { font-family: var(--mono); font-size: 12px; color: var(--ink-2); margin-bottom: 7px; }
+.spell-senses { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; }
+.spell-sense { display: flex; align-items: baseline; gap: 6px; font-size: 13px; color: var(--ink); }
+.spell-foot { display: flex; justify-content: flex-end; margin-top: 2px; }
+.spell-info {
+  width: 18px; height: 18px; padding: 0;
+  border-radius: 999px; border: 1.5px solid var(--accent);
+  background: var(--accent); color: #fff;
+  font-size: 12px; font-weight: 700; line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center;
+  cursor: help;
 }

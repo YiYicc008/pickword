@@ -71,6 +71,58 @@ export function toast(message, type = 'default', duration = 2400) {
 
 /* ---------------- 弹层 ---------------- */
 
+/* 记录「可视视口」高度（软键盘弹出时 iOS/Android 的 visualViewport 会变小） */
+function syncViewportHeight() {
+  const vv = window.visualViewport;
+  const h = vv && vv.height ? vv.height : window.innerHeight;
+  const top = (vv && vv.offsetTop) || 0;
+  const root = document.documentElement;
+  root.style.setProperty('--vvh', Math.round(h) + 'px');
+  root.style.setProperty('--vvt', Math.round(top) + 'px');
+  // 键盘以「覆盖」方式弹出时（布局视口不变），把弹层顶到键盘上沿：
+  // 可视区底部 = offsetTop + height，所以留白 = innerHeight −(offsetTop + height)
+  const pad = Math.max(0, Math.round(window.innerHeight - (h + top)));
+  root.style.setProperty('--vvpad', pad + 'px');
+}
+
+const NL = String.fromCharCode(10);
+
+/** ?debug=1 时把视口相关数值显示在左下角（排查手机键盘问题用） */
+function mountViewportDebug() {
+  if (!/[?&]debug=1/.test(location.search)) return;
+  const box = document.createElement('pre');
+  box.style.cssText = 'position:fixed;left:6px;top:6px;z-index:99999;margin:0;padding:6px 8px;'
+    + 'font:11px/1.45 ui-monospace,monospace;color:#123;background:rgba(255,255,255,.94);'
+    + 'border:1px solid #b8452f;border-radius:6px;max-width:64vw;white-space:pre-wrap';
+  document.body.appendChild(box);
+  const paint = () => {
+    const vv = window.visualViewport;
+    const sheet = document.querySelector('.modal');
+    const r = sheet ? sheet.getBoundingClientRect() : null;
+    const lines = [
+      'innerH=' + window.innerHeight + ' innerW=' + window.innerWidth,
+      'vv.h=' + (vv ? Math.round(vv.height) : '-') + ' vv.top=' + (vv ? Math.round(vv.offsetTop) : '-'),
+      'vv.scale=' + (vv ? vv.scale : '-') + ' pad=' + document.documentElement.style.getPropertyValue('--vvpad'),
+      '--vvh=' + document.documentElement.style.getPropertyValue('--vvh')
+        + ' --vvpad=' + document.documentElement.style.getPropertyValue('--vvpad'),
+    ];
+    if (r) lines.push('sheet=' + Math.round(r.top) + '..' + Math.round(r.bottom));
+    box.textContent = lines.join(NL);
+  };
+  paint();
+  setInterval(paint, 700);
+}
+
+if (typeof window !== 'undefined') {
+  syncViewportHeight();
+  setTimeout(mountViewportDebug, 600);
+  window.addEventListener('resize', syncViewportHeight);
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', syncViewportHeight);
+    window.visualViewport.addEventListener('scroll', syncViewportHeight);
+  }
+}
+
 let openCount = 0;
 
 export function openModal({ title, subtitle, body, footer, wide = false, onClose, closable = true }) {
@@ -122,7 +174,9 @@ export function openModal({ title, subtitle, body, footer, wide = false, onClose
   document.addEventListener('keydown', onKey);
 
   backdrop.addEventListener('pointerdown', (e) => {
-    if (e.target === backdrop && closable) close();
+    // 手机上是整屏弹层，没有「外面」可点；避免误触键盘上沿的遮罩把弹窗关掉
+    const fullScreen = window.matchMedia && window.matchMedia('(max-width: 760px)').matches;
+    if (e.target === backdrop && closable && !fullScreen) close();
   });
 
   setTimeout(() => {

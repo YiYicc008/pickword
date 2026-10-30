@@ -4,9 +4,9 @@ import { getBooks, addTerm, updateWord, getWordByTerm, getBooksOfWord, getSettin
 import { icon, toast, openModal } from './ui.js';
 import { el, debounce, looksEnglish } from './util.js';
 import { enrichTerm, pronounce } from './dict.js';
-import { hasAI, classifyWord, translateWord, translateSenses, describeWord } from './ai.js';
+import { hasAI, classifyWord, translateWord, translateSenses, describeWord, checkSpelling } from './ai.js';
 import { vs } from './viewstate.js';
-import { posAbbr, sensesSig } from './format.js';
+import { posAbbr, posClass, sensesSig } from './format.js';
 
 const aiClient = () =>
   hasAI()
@@ -154,6 +154,153 @@ export function openAddWordDialog({ preselectBookId = null, initialTerm = '' } =
     previewHost.appendChild(card);
   }
 
+  /* 拼写检查（仅在配置了 AI 且设置里开启时生效） */
+  const spellHost = el('div', { class: 'spell-host' });
+  body.insertBefore(spellHost, previewHost);
+
+  let spellDismissed = false;
+  let spellSeq = 0;
+  let spellModal = null;
+
+  function clearSpell() {
+    spellSeq++;
+    spellHost.innerHTML = '';
+    spellHost.classList.remove('inline');
+    document.querySelectorAll('.spell-card.float, .spell-card.strip').forEach((n) => n.remove());
+  }
+
+  /** 桌面浮在弹窗旁边；手机则贴在弹窗底部按钮上方，保证始终可见 */
+  function placeSpell(card) {
+    const modal = spellModal || card.closest('.modal');
+    const tight = window.matchMedia('(max-width: 760px)').matches;
+    const gap = 14;
+    const width = 268;
+
+    // 手机（或放不下时）：跟在输入框下面，随正文自然排列
+    const toStrip = () => {
+      card.classList.remove('float', 'strip');
+      card.style.left = '';
+      card.style.top = '';
+      card.style.bottom = '';
+      spellHost.classList.add('inline');
+      if (card.parentNode !== spellHost) spellHost.appendChild(card);
+    };
+
+    const toBeside = () => {
+      const box = modal.getBoundingClientRect();
+      const field = input.getBoundingClientRect();
+      const rightSpace = window.innerWidth - box.right - gap;
+      const leftSpace = box.left - gap;
+      if (rightSpace < width && leftSpace < width) return false;
+      card.classList.remove('inline', 'strip');
+      card.classList.add('float');
+      if (card.parentNode !== document.body) document.body.appendChild(card);
+      card.style.bottom = '';
+      const x = rightSpace >= width ? box.right + gap : box.left - gap - width;
+      const y = Math.max(12, Math.min(field.top - 6, window.innerHeight - 160));
+      card.style.left = Math.round(x) + 'px';
+      card.style.top = Math.round(y) + 'px';
+      return true;
+    };
+
+    spellHost.classList.remove('inline');
+    if (!modal || tight) { toStrip(); return; }
+    if (!toBeside()) toStrip();
+  }
+
+  function renderSpell(sug) {
+    if (!spellModal) spellModal = body.closest('.modal');
+    spellHost.innerHTML = '';
+
+    const card = el('div', { class: 'spell-card' });
+
+    const head = el('div', { class: 'spell-head' });
+    head.appendChild(el('span', { class: 'spell-title', text: '猜你想填' }));
+    const closeBtn = el('button', { class: 'spell-close', type: 'button', 'aria-label': '关闭提示' });
+    closeBtn.innerHTML = icon('x', 13);
+    closeBtn.addEventListener('click', () => { spellDismissed = true; clearSpell(); });
+    head.appendChild(closeBtn);
+    card.appendChild(head);
+
+    const wordBtn = el('button', { class: 'spell-word', type: 'button', title: '点击替换为这个拼写', text: sug.word });
+    wordBtn.addEventListener('click', () => {
+      input.value = sug.word;
+      input.focus();
+      const end = input.value.length;
+      try { input.setSelectionRange(end, end); } catch (e) { /* 忽略 */ }
+      clearSpell();
+      runEnrich();
+      renderChips();
+    });
+    card.appendChild(wordBtn);
+    card.appendChild(el('div', { class: 'spell-use', text: '点击替换' }));
+
+    if (sug.phonetic) card.appendChild(el('div', { class: 'spell-phon', text: sug.phonetic }));
+
+    if (sug.senses && sug.senses.length) {
+      const list = el('div', { class: 'spell-senses' });
+      for (const item of sug.senses) {
+        const row = el('div', { class: 'spell-sense' });
+        if (item.pos) {
+          row.appendChild(el('span', { class: `pos-tag ${posClass(item.pos)}`, text: posAbbr(item.pos) }));
+        }
+        row.appendChild(el('span', { text: item.zh }));
+        list.appendChild(row);
+      }
+      card.appendChild(list);
+    }
+
+    const foot = el('div', { class: 'spell-foot' });
+    const info = el('button', {
+      class: 'spell-info',
+      type: 'button',
+      text: '!',
+      title: '可在「设置 → 拼写检查」中关闭',
+      'aria-label': '可在设置中关闭拼写检查',
+    });
+    info.addEventListener('click', () => toast('可在「设置 → 拼写检查」中关闭该功能', 'default', 2600));
+    foot.appendChild(info);
+    card.appendChild(foot);
+
+    spellHost.appendChild(card);
+    placeSpell(card);
+    // 弹窗入场动画期间先量到的位置可能偏，动画结束后再定一次位
+    [120, 320, 700].forEach((ms) => setTimeout(() => {
+      if (card.isConnected) placeSpell(card);
+    }, ms));
+  }
+
+  const runSpell = debounce(async () => {
+    if (spellDismissed) return;
+    const st = getSettings();
+    if (!st.spellcheck || !hasAI()) { clearSpell(); return; }
+    const parts = splitTerms(input.value);
+    if (parts.length !== 1) { clearSpell(); return; }
+    const term = parts[0];
+    if (term.length < 3 || !looksEnglish(term)) { clearSpell(); return; }
+    if (getWordByTerm(term)) { clearSpell(); return; }
+
+    const seq = ++spellSeq;
+    try {
+      const res = await checkSpelling(term);
+      if (seq !== spellSeq) return;
+      if (res && res.correct === false && res.word) renderSpell(res);
+      else clearSpell();
+    } catch (e) {
+      if (seq === spellSeq) clearSpell();
+    }
+  }, 1500);
+
+  function replaceSpellCard() {
+    const card = document.querySelector('.spell-card.float, .spell-card.strip');
+    if (card) placeSpell(card);
+  }
+  window.addEventListener('resize', replaceSpellCard);
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', replaceSpellCard);
+    window.visualViewport.addEventListener('scroll', replaceSpellCard);
+  }
+
   /* 自动补全信息 */
   const runEnrich = debounce(async () => {
     const parts = splitTerms(input.value);
@@ -202,7 +349,7 @@ export function openAddWordDialog({ preselectBookId = null, initialTerm = '' } =
     enrichCache.set(term.toLowerCase(), { pending: true, promise });
   }, 480);
 
-  input.addEventListener('input', () => { runEnrich(); renderChips(); });
+  input.addEventListener('input', () => { runEnrich(); renderChips(); runSpell(); });
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); submit(); }
   });
@@ -248,6 +395,8 @@ export function openAddWordDialog({ preselectBookId = null, initialTerm = '' } =
     title: '添加单词',
     subtitle: '自动获取音标、发音、词性与中文释义',
     body, footer: foot,
+    // 关闭弹窗（含点暗区、Esc、取消）时一并收起浮动提示，避免小卡片残留
+    onClose: () => clearSpell(),
   });
 
   input.addEventListener('input', () => {

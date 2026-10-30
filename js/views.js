@@ -1220,6 +1220,43 @@ export function openSettingsDialog() {
   aiSec.appendChild(testRow);
   body.appendChild(aiSec);
 
+  /* 拼写检查 */
+  const spellSec = el('div', { class: 'settings-section' });
+  spellSec.appendChild(el('h3', { text: '拼写检查' }));
+  const aiReady = hasAI();
+  spellSec.appendChild(el('p', {
+    text: aiReady
+      ? '录入单词时若拼写可能有误，会在输入框旁边提示「猜你想填」，点击即可替换。'
+      : '需要先在上方配置 AI 接口，该功能才会生效。',
+  }));
+
+  const spellRow = el('div', { class: 'setting-row' });
+  // 未接入 AI 时开关固定为关闭态：可点击（给出原因），但不切换、不播放动画、不写入设置
+  const spellSwitch = el('button', {
+    class: `switch${aiReady && s.spellcheck ? ' on' : ''}${aiReady ? '' : ' locked'}`,
+    'aria-label': '拼写检查',
+    'aria-pressed': aiReady && s.spellcheck ? 'true' : 'false',
+  });
+  spellSwitch.addEventListener('click', () => {
+    if (!aiReady) {
+      toast('先在设置里配置 AI 接口，拼写检查才会生效', 'default', 2600);
+      return;
+    }
+    const on = !spellSwitch.classList.contains('on');
+    spellSwitch.classList.toggle('on', on);
+    spellSwitch.setAttribute('aria-pressed', on ? 'true' : 'false');
+    updateSettings({ spellcheck: on });
+  });
+  spellRow.append(
+    el('div', { class: 'label' }, el('span', { text: '启用拼写检查' }), el('small', {
+      text: aiReady ? '停止输入 1.5 秒后检查；关闭后不调用接口' : '配置 AI 接口后才能启用',
+    })),
+    spellSwitch
+  );
+  spellSec.appendChild(spellRow);
+  body.appendChild(spellSec);
+
+
   /* 词典 */
   const dictSec = el('div', { class: 'settings-section' });
   dictSec.appendChild(el('h3', { text: '词典与发音' }));
@@ -1985,7 +2022,7 @@ export function openAboutDialog() {
   const books = getBooks();
   const canSeed = books.length === 1 && getEntriesOfBook(books[0].id).length === 0;
   const foot = el('div', { style: 'display:flex;gap:9px;align-items:center;width:100%' });
-  foot.appendChild(el('span', { style: 'font-size:11.5px;color:var(--ink-3);flex:1', text: 'v1.2.0.1 · 本地优先 · 离线可用' }));
+  foot.appendChild(el('span', { style: 'font-size:11.5px;color:var(--ink-3);flex:1', text: 'v1.2.1.0 · 本地优先 · 离线可用' }));
   if (canSeed) {
     const demoBtn = el('button', { class: 'btn btn-quiet', text: '载入示例数据' });
     demoBtn.addEventListener('click', async () => {

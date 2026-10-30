@@ -23,6 +23,7 @@ const DEFAULT_SETTINGS = {
   aiKey: '',
   autoEnrich: true,
   dictApi: true,
+  spellcheck: true,
   ttsRate: 0.9,
   theme: 'light',
   supabaseUrl: '',

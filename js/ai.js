@@ -255,6 +255,62 @@ export async function buildClouds(words) {
 }
 
 /** 测试连接 */
+
+/* ---------------- 拼写检查 ---------------- */
+
+const spellCache = new Map();
+
+/**
+ * 判断一个词是否为常见英文单词的正确拼写。
+ * 返回 { correct: true } 或 { correct: false, word, phonetic, senses:[{pos, zh}] }
+ */
+export async function checkSpelling(term) {
+  const raw = String(term || '').trim();
+  if (!raw) return { correct: true };
+  const cacheKey = raw.toLowerCase();
+  if (spellCache.has(cacheKey)) return spellCache.get(cacheKey);
+
+  const ask =
+    '判断这个字符串是否为一个正确拼写的常见英文单词：' + raw + '\n\n' +
+    '如果它是正确的英文单词（常见的派生词也算），返回 {"correct":true}。\n' +
+    '如果它只是某个常见英文单词的拼写错误（多字母、少字母、字母顺序错、明显误拼），返回：\n' +
+    '{"correct":false,"word":"正确拼写（全小写）","phonetic":"/音标/",' +
+    '"senses":[{"pos":"词性缩写如 n.","zh":"中文释义"}]}\n' +
+    'senses 最多两条，按最常用顺序；音标用国际音标并带斜杠；中文释义不超过 12 个字。\n' +
+    '如果无法判断（专有名词、生僻词、非英语），一律返回 {"correct":true}。';
+
+  const text = await chat(
+    [
+      { role: 'system', content: '你是英语拼写检查器。只输出 JSON，不要输出解释。' },
+      { role: 'user', content: ask },
+    ],
+    { json: true, temperature: 0, maxTokens: 260, timeout: 20000 },
+  );
+
+  const data = parseJSON(text) || {};
+  let result = { correct: true };
+
+  if (data.correct === false) {
+    const word = String(data.word || '').trim().toLowerCase();
+    const looksLikeWord = /^[a-z][a-z'-]*$/.test(word);
+    if (looksLikeWord && word && word !== cacheKey) {
+      const phoneticRaw = String(data.phonetic || '').trim().replace(/^\/+|\/+$/g, '');
+      const phonetic = phoneticRaw ? '/' + phoneticRaw + '/' : '';
+      const senses = (Array.isArray(data.senses) ? data.senses : [])
+        .map((x) => ({
+          pos: String((x && x.pos) || '').trim().slice(0, 10),
+          zh: String((x && x.zh) || '').trim().slice(0, 20),
+        }))
+        .filter((x) => x.zh)
+        .slice(0, 2);
+      result = { correct: false, word, phonetic, senses };
+    }
+  }
+
+  spellCache.set(cacheKey, result);
+  return result;
+}
+
 export async function testConnection() {
   const raw = await chat(
     [{ role: 'user', content: '回复两个字：正常' }],
